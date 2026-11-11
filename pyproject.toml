@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mc-server-installer"
+dynamic = ["version"]
+description = "Step-by-step Minecraft server installer for 16 server types (Vanilla, Paper, Purpur, Fabric, Forge, NeoForge, hybrids...)"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+dependencies = ["PyQt6>=6.6", "PyOpenGL>=3.1", "certifi"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Environment :: X11 Applications :: Qt",
+    "Topic :: Games/Entertainment",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pyflakes>=3"]
+
+[project.gui-scripts]
+mc-server-installer = "mcsi.ui.main_window:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "mcsi.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["mcsi*"]
+
+[tool.setuptools.package-data]
+"mcsi.i18n" = ["*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
