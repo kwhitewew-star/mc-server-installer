@@ -69,6 +69,9 @@ jobs:
         shell: pwsh
         env:
           GALLIUM_DRIVER: llvmpipe
+          # Use the desktop OpenGL path like a PC with a graphics card does, so Qt picks the Mesa
+          # opengl32.dll next to the .exe instead of its old bundled software fallback (GLSL <= 1.30).
+          QT_OPENGL: desktop
           MCSI_SCREENSHOT_DELAY: "9000"
         run: |
           $ErrorActionPreference = "Stop"
