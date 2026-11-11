@@ -32,9 +32,22 @@
 | --- |
 | ![포트포워딩](docs/screenshots/ko_port_guide.png) |
 
-## 실행
+## 다운로드
 
-**Python 3.10 이상**이 필요합니다. Java는 미리 없어도 됩니다.
+**[Releases](https://github.com/kwhitewew-star/mc-server-installer/releases/latest)**에서 최신 버전을 받으세요.
+
+| 파일 | 설명 |
+| --- | --- |
+| `MC-Server-Installer-x.y.z.exe` | Windows 10/11용 파일 하나짜리. 더블클릭하면 바로 실행됩니다. |
+| `MC-Server-Installer-x.y.z-portable.zip` | 폴더 버전. 압축을 풀고 `MC-Server-Installer.exe`를 실행하면 되며, 더 빨리 켜집니다. |
+| `mc-server-installer-x.y.z-source.zip` | 소스 코드 (아래 참고). |
+
+Java는 미리 없어도 됩니다. exe에 코드 서명이 없어서 "Windows의 PC 보호" 창이 뜰 수 있는데,
+**추가 정보 → 실행**을 누르면 됩니다.
+
+## 소스로 실행
+
+**Python 3.10 이상**이 필요합니다.
 
 **Windows**: `run.bat`을 더블클릭하세요. 처음 실행할 때 필요한 패키지를 설치합니다.
 

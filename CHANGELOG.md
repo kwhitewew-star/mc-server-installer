@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.1
+
+- Windows release builds: a single-file `.exe`, a portable zip and a source zip are attached to each
+  GitHub release automatically.
+- App icon, and the installer now shows its own icon in the taskbar.
+- Switching the language restarts correctly from the packaged `.exe`.
+
 ## 1.0.0
 
 First public release.

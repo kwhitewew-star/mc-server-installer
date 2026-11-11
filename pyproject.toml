@@ -32,6 +32,7 @@ include = ["mcsi*"]
 
 [tool.setuptools.package-data]
 "mcsi.i18n" = ["*.json"]
+"mcsi.assets" = ["*.png", "*.ico"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

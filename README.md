@@ -36,9 +36,22 @@ router's port and starts the server once to check that it works.
 | --- | --- |
 | ![Mods and plugins](docs/screenshots/addons.png) | ![Port forwarding](docs/screenshots/port_guide.png) |
 
-## Getting started
+## Download
 
-You need **Python 3.10 or newer**. Java is not required in advance: the installer can download it.
+Get the latest version from **[Releases](https://github.com/kwhitewew-star/mc-server-installer/releases/latest)**:
+
+| File | What it is |
+| --- | --- |
+| `MC-Server-Installer-x.y.z.exe` | Windows 10/11, single file. Just double-click. |
+| `MC-Server-Installer-x.y.z-portable.zip` | Windows folder version. Unzip and run `MC-Server-Installer.exe`; starts faster. |
+| `mc-server-installer-x.y.z-source.zip` | Source code (see below). |
+
+Java is not required in advance: the installer can download it. The `.exe` is not code-signed, so Windows
+may say "Windows protected your PC"; click **More info → Run anyway**.
+
+## Running from source
+
+You need **Python 3.10 or newer**.
 
 **Windows**: double-click `run.bat`. It installs the Python packages on first launch.
 
@@ -81,7 +94,8 @@ mcsi/
   ui/          PyQt6 windows, pages and widgets
   gfx/         OpenGL background, GLSL shaders and server animations
   i18n/        translation catalogs (<code>.json)
-scripts/       selftest.py, screenshots.py, i18n_sync.py
+  assets/      app icon
+scripts/       selftest.py, screenshots.py, i18n_sync.py, build_exe.py
 tests/         offline tests with fake APIs and a fake Java
 ```
 
@@ -92,7 +106,19 @@ python -m pip install -r requirements-dev.txt
 python -m pytest              # offline: fake APIs, fake Java, fake UPnP router
 python -m pyflakes mcsi scripts tests
 python scripts/screenshots.py ko      # walk through every page offscreen, check for clipped layouts
+python scripts/build_exe.py           # build the .exe / portable zip / source zip into dist/ (needs pyinstaller)
 ```
+
+### Releasing
+
+Bump `__version__` in `mcsi/__init__.py`, add a section to `CHANGELOG.md`, commit, then push a tag:
+
+```bash
+git tag v1.0.1
+git push origin v1.0.1
+```
+
+The *Release* workflow builds the Windows files on GitHub and attaches them to the release.
 
 ### Translations
 

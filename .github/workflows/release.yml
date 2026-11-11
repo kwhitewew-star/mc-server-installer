@@ -1,0 +1,87 @@
+name: Release
+
+# Push a tag like v1.0.1 and this builds the Windows .exe, the portable zip and a source zip,
+# then attaches them to the GitHub release for that tag (creating the release if needed).
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)build, e.g. v1.0.1"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: python -m pip install -r requirements-dev.txt pyinstaller
+
+      - name: Tests
+        run: python -m pytest -q
+        env:
+          QT_QPA_PLATFORM: offscreen
+
+      - name: Check version matches tag
+        shell: bash
+        run: |
+          v=$(python -c "import mcsi; print(mcsi.__version__)")
+          [ "v$v" = "$TAG" ] || { echo "mcsi/__init__.py says $v but the tag is $TAG"; exit 1; }
+
+      - name: Build
+        run: python scripts/build_exe.py
+
+      - name: Smoke test the .exe
+        continue-on-error: true      # CI machines have no GPU; the screenshot artifact shows the result
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem dist -Filter "*.exe" | Select-Object -First 1
+          $env:MCSI_SCREENSHOT = "$PWD\smoke.png"
+          $p = Start-Process $exe.FullName -PassThru
+          if (-not $p.WaitForExit(90000)) { $p.Kill(); throw "the app did not finish in time" }
+          if (-not (Test-Path smoke.png)) { throw "the app did not start" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ env.TAG }}
+          path: |
+            dist/*
+            smoke.png
+
+      - name: Publish release
+        shell: bash
+        run: |
+          v="${TAG#v}"
+          python - "$v" > notes.md <<'PY'
+          import re, sys
+          text = open("CHANGELOG.md", encoding="utf-8").read()
+          m = re.search(rf"^## {re.escape(sys.argv[1])}\s*\n(.*?)(?=^## |\Z)", text, re.S | re.M)
+          print((m.group(1).strip() if m else "") + """
+
+          ### Download
+          - **MC-Server-Installer-*.exe**: single file, just double-click (Windows 10/11).
+          - **...-portable.zip**: unzip and run `MC-Server-Installer.exe`; starts faster.
+          - **...-source.zip**: source code (needs Python 3.10+, run `run.bat`).
+
+          Windows may show "Windows protected your PC" because the file is not code-signed:
+          click **More info → Run anyway**.""")
+          PY
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "$TAG" --notes-file notes.md
+          gh release edit "$TAG" --notes-file notes.md
+          gh release upload "$TAG" dist/* --clobber

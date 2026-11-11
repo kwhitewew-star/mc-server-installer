@@ -5,9 +5,10 @@ from ..i18n import _
 
 import os
 import sys
+from pathlib import Path
 
 from PyQt6.QtCore import QEasingCurve, QPointF, QRectF, Qt, QVariantAnimation, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPen, QPixmap
+from PyQt6.QtGui import QColor, QFont, QIcon, QLinearGradient, QPainter, QPen, QPixmap
 from PyQt6.QtWidgets import (QAbstractButton, QApplication, QHBoxLayout, QMessageBox, QStackedWidget, QVBoxLayout, QWidget)
 
 from .app_settings import APP_DEFAULTS, SettingsOverlay
@@ -704,21 +705,38 @@ def main():
         set_default_format()
     except Exception:
         pass
+    if sys.platform == "win32":      # own taskbar group + icon instead of python.exe's
+        try:
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("mcsi.MCServerInstaller")
+        except Exception:
+            pass
     QApplication.setHighDpiScaleFactorRoundingPolicy(Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     app = QApplication(sys.argv)
     app.setApplicationName("MC Server Installer")
+    icon = Path(__file__).resolve().parents[1] / "assets" / "icon.png"
+    if icon.is_file():
+        app.setWindowIcon(QIcon(str(icon)))
     font = pick_font()
     app.setFont(QFont(font, 10))
     app.setStyleSheet(qss(font))
     w = MainWindow()
     w.show()
+    shot = os.environ.get("MCSI_SCREENSHOT")      # smoke test for packaged builds: save the window and quit
+    if shot:
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(int(os.environ.get("MCSI_SCREENSHOT_DELAY", "6000")),
+                          lambda: (w.grab().save(shot), w.close()))
     code = app.exec()
     if RESTART["on"]:
         import subprocess
-        from pathlib import Path
-        root = Path(__file__).resolve().parents[2]
-        subprocess.Popen([sys.executable, "-m", "mcsi"], cwd=str(root))
+        if getattr(sys, "frozen", False):           # packaged .exe: just start it again
+            subprocess.Popen([sys.executable] + sys.argv[1:])
+        else:
+            root = Path(__file__).resolve().parents[2]
+            subprocess.Popen([sys.executable, "-m", "mcsi"], cwd=str(root))
     # exit immediately even if worker threads are waiting on the network (settings were saved in closeEvent)
-    sys.stdout.flush()
-    sys.stderr.flush()
+    for stream in (sys.stdout, sys.stderr):        # None in a windowed .exe
+        if stream:
+            stream.flush()
     os._exit(code)
