@@ -291,6 +291,7 @@ class MainWindow(QWidget):
         self._apply_app_settings(startup=True)
         self.bg = Background(self, radius=0)
         self.gl = None
+        self.gl_error = ""
         if self.st.fx != "off":
             self._start_gl()
         outer = QVBoxLayout(self)
@@ -368,17 +369,27 @@ class MainWindow(QWidget):
         self.ports = PortGuide(self, st)
         self.pages["done"].port_guide.connect(self.ports.open_anim)
         self._fx_label(self.st.fx)
+        self._show_gl_error()
         self.pages["server"].changed.connect(self._sync_gl)
         self.pages["server"].picked.connect(lambda k: self.gl and self.gl.play_anim(k))
         self._sync_gl()
 
     # ---- 3D background ----
     def _start_gl(self):
+        self.gl_error = ""
         try:
             from ..gfx.scene import GLBackground
             self.gl = GLBackground(self, self.glass_rects, self.st.fx)
-        except Exception as e:  # e.g. PyOpenGL missing
-            self._gl_failed(str(e))
+        except Exception:  # e.g. PyOpenGL missing or broken in a packaged build
+            import traceback
+            msg = "import: " + traceback.format_exc()
+            try:
+                from ..core.java import APP_DIR
+                APP_DIR.mkdir(parents=True, exist_ok=True)
+                (APP_DIR / "gl_error.log").write_text(msg, encoding="utf-8")
+            except OSError:
+                pass
+            self._gl_failed(msg)
             return
         self.gl.failed.connect(self._gl_failed)
         self.gl.parallax = bool(self.app("parallax"))
@@ -400,9 +411,20 @@ class MainWindow(QWidget):
         self.bg.show()
         self.bg.timer.start(33)
         self.bg.lower()
-        self.st.fx = "off"
+        # The failure is not saved as "off": the next launch tries 3D again (e.g. after a driver update).
+        self.gl_error = msg
         self._fx_label("off", failed=True)
+        if getattr(self, "bar", None):
+            self._show_gl_error()
         self.update()
+
+    def _show_gl_error(self):
+        if self.gl_error:
+            from ..core.java import APP_DIR
+            msg = self.gl_error
+            first = next((ln for ln in reversed(msg.strip().splitlines()) if ln.strip()), msg)[:200]
+            self.bar.fx.setToolTip(_("3D background could not start: {0}\nDetails: {1}").format(
+                first, APP_DIR / "gl_error.log"))
 
     def _gl_lowered(self, q):
         self.st.fx = q
@@ -410,6 +432,9 @@ class MainWindow(QWidget):
         self.bar.fx.setToolTip(_("Quality was lowered automatically to match your graphics performance"))
 
     def _fx_label(self, fx, failed=False):
+        if not getattr(self, "bar", None):          # called before the title bar exists
+            return
+        failed = failed or (self.gl is None and bool(self.gl_error) and fx != "off")
         names = {"high": _("High"), "normal": _("Normal"), "off": _("Off")}
         self.bar.fx.setText((_("✦ 3D effects: ") + names.get(fx, fx)) if not failed else _("✦ 3D effects: not supported"))
 
@@ -725,8 +750,15 @@ def main():
     shot = os.environ.get("MCSI_SCREENSHOT")      # smoke test for packaged builds: save the window and quit
     if shot:
         from PyQt6.QtCore import QTimer
-        QTimer.singleShot(int(os.environ.get("MCSI_SCREENSHOT_DELAY", "6000")),
-                          lambda: (w.grab().save(shot), w.close()))
+        def finish():
+            w.grab().save(shot)
+            if w.gl and w.gl.ok:
+                status = "gl ok: " + getattr(w.gl, "renderer", "?")
+            else:
+                status = "gl failed: " + (w.gl_error or "not started")
+            Path(shot).with_suffix(".txt").write_text(status, encoding="utf-8")
+            w.close()
+        QTimer.singleShot(int(os.environ.get("MCSI_SCREENSHOT_DELAY", "6000")), finish)
     code = app.exec()
     if RESTART["on"]:
         import subprocess

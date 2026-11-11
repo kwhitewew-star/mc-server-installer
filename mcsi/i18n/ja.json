@@ -33,6 +33,7 @@
  "1. Automatic (UPnP)": "1. 自動 (UPnP)",
  "100 = everyone must sleep, 1 = one player is enough": "100 = 全員が寝る必要あり、1 = 1 人で十分",
  "2. Manual setup (if automatic fails)": "2. 手動設定 (自動で失敗した場合)",
+ "3D background could not start: {0}\nDetails: {1}": "3D 背景を開始できませんでした: {0}\n詳細: {1}",
  "3D background quality": "3D 背景の品質",
  "3D background quality (High → Normal → Off)": "3D 背景の品質 (高 → 標準 → オフ)",
  "3D view follows the mouse": "3D ビューがマウスに追従",

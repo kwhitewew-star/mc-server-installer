@@ -1,15 +1,23 @@
 name: Release
 
-# Push a tag like v1.0.1 and this builds the Windows .exe, the portable zip and a source zip,
-# then attaches them to the GitHub release for that tag (creating the release if needed).
+# Push a tag like v1.0.2: builds the Windows .exe, the portable zip and a source zip, checks that both
+# builds start with a working OpenGL background, then attaches them to the GitHub release for that tag.
+#
+# Run it by hand (Actions → Release → Run workflow) to only build and test a branch or tag;
+# tick "publish" to also upload the files to that tag's release.
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
     inputs:
-      tag:
-        description: "Existing tag to (re)build, e.g. v1.0.1"
+      ref:
+        description: "Branch or tag to build"
         required: true
+        default: main
+      publish:
+        description: "Upload to the release (ref must be a tag like v1.0.2)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -18,13 +26,14 @@ jobs:
   windows:
     runs-on: windows-latest
     env:
-      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      REF: ${{ github.event.inputs.ref || github.ref_name }}
+      PUBLISH: ${{ github.event_name == 'push' || github.event.inputs.publish == 'true' }}
       GH_TOKEN: ${{ github.token }}
       PYTHONIOENCODING: utf-8
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          ref: ${{ github.event.inputs.ref || github.ref }}
 
       - uses: actions/setup-python@v5
         with:
@@ -39,35 +48,65 @@ jobs:
           QT_QPA_PLATFORM: offscreen
 
       - name: Check version matches tag
+        if: env.PUBLISH == 'true'
         shell: bash
         run: |
           v=$(python -c "import mcsi; print(mcsi.__version__)")
-          [ "v$v" = "$TAG" ] || { echo "mcsi/__init__.py says $v but the tag is $TAG"; exit 1; }
+          [ "v$v" = "$REF" ] || { echo "mcsi/__init__.py says $v but the tag is $REF"; exit 1; }
 
       - name: Build
         run: python scripts/build_exe.py
 
-      - name: Smoke test the .exe
-        continue-on-error: true      # CI machines have no GPU; the screenshot artifact shows the result
-        shell: pwsh
-        run: |
-          $exe = Get-ChildItem dist -Filter "*.exe" | Select-Object -First 1
-          $env:MCSI_SCREENSHOT = "$PWD\smoke.png"
-          $p = Start-Process $exe.FullName -PassThru
-          if (-not $p.WaitForExit(90000)) { $p.Kill(); throw "the app did not finish in time" }
-          if (-not (Test-Path smoke.png)) { throw "the app did not start" }
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: build-${{ env.TAG }}
-          path: |
-            dist/*
-            smoke.png
-
-      - name: Publish release
+      # CI machines have no GPU, so use Mesa's software OpenGL (llvmpipe) to really exercise the 3D background.
+      - name: Software OpenGL for the smoke test
         shell: bash
         run: |
-          v="${TAG#v}"
+          gh release download --repo pal1000/mesa-dist-win --pattern "*-release-msvc.7z" -D mesa
+          7z x mesa/*.7z -omesa/x -y > /dev/null
+          ls mesa/x/x64
+
+      - name: Smoke test (single .exe and portable)
+        shell: pwsh
+        env:
+          GALLIUM_DRIVER: llvmpipe
+          MCSI_SCREENSHOT_DELAY: "9000"
+        run: |
+          $ErrorActionPreference = "Stop"
+          $fail = 0
+          # single-file build
+          New-Item -ItemType Directory smoke/onefile -Force | Out-Null
+          Copy-Item (Get-ChildItem dist -Filter "*.exe")[0].FullName smoke/onefile/app.exe
+          # portable build
+          Expand-Archive (Get-ChildItem dist -Filter "*-portable.zip")[0].FullName smoke/portable -Force
+          $targets = @{ "onefile" = "smoke/onefile/app.exe"; "portable" = "smoke/portable/MC-Server-Installer/MC-Server-Installer.exe" }
+          foreach ($name in $targets.Keys) {
+            $exe = Resolve-Path $targets[$name]
+            Copy-Item mesa/x/x64/*.dll (Split-Path $exe) -Force
+            $env:MCSI_SCREENSHOT = "$PWD\smoke\$name.png"
+            $p = Start-Process $exe -PassThru
+            if (-not $p.WaitForExit(120000)) { $p.Kill(); Write-Host "::error::$name did not finish in time"; $fail++; continue }
+            $report = "$PWD\smoke\$name.txt"
+            if (-not (Test-Path $report)) { Write-Host "::error::$name did not start"; $fail++; continue }
+            $text = Get-Content $report -Raw
+            Write-Host "$name -> $text"
+            if (-not $text.StartsWith("gl ok")) { Write-Host "::error::$name 3D background failed: $text"; $fail++ }
+          }
+          if ($fail) { exit 1 }
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: build-${{ github.run_number }}
+          path: |
+            dist/*
+            smoke/*.png
+            smoke/*.txt
+
+      - name: Publish release
+        if: env.PUBLISH == 'true'
+        shell: bash
+        run: |
+          v="${REF#v}"
           python - "$v" > notes.md <<'PY'
           import re, sys
           text = open("CHANGELOG.md", encoding="utf-8").read()
@@ -82,6 +121,6 @@ jobs:
           Windows may show "Windows protected your PC" because the file is not code-signed:
           click **More info → Run anyway**.""")
           PY
-          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "$TAG" --notes-file notes.md
-          gh release edit "$TAG" --notes-file notes.md
-          gh release upload "$TAG" dist/* --clobber
+          gh release view "$REF" >/dev/null 2>&1 || gh release create "$REF" --title "$REF" --notes-file notes.md
+          gh release edit "$REF" --notes-file notes.md
+          gh release upload "$REF" dist/* --clobber

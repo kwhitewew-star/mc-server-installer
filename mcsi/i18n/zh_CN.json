@@ -33,6 +33,7 @@
  "1. Automatic (UPnP)": "1. 自动 (UPnP)",
  "100 = everyone must sleep, 1 = one player is enough": "100 = 所有人都要睡觉，1 = 一人即可",
  "2. Manual setup (if automatic fails)": "2. 手动设置（自动失败时）",
+ "3D background could not start: {0}\nDetails: {1}": "无法启动 3D 背景：{0}\n详细信息：{1}",
  "3D background quality": "3D 背景质量",
  "3D background quality (High → Normal → Off)": "3D 背景质量（高 → 普通 → 关闭）",
  "3D view follows the mouse": "3D 视图跟随鼠标",

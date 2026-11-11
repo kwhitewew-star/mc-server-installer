@@ -33,6 +33,7 @@
  "1. Automatic (UPnP)": "1. 자동 (UPnP)",
  "100 = everyone must sleep, 1 = one player is enough": "100이면 전원 수면, 1이면 한 명만 자도 됨",
  "2. Manual setup (if automatic fails)": "2. 수동 설정 (자동이 안 될 때)",
+ "3D background could not start: {0}\nDetails: {1}": "3D 배경을 시작하지 못했습니다: {0}\n자세한 내용: {1}",
  "3D background quality": "3D 배경 품질",
  "3D background quality (High → Normal → Off)": "3D 배경 효과 품질 (높음 → 보통 → 끔)",
  "3D view follows the mouse": "마우스 따라 움직이는 3D 시점",

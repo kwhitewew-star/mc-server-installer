@@ -33,6 +33,7 @@
  "1. Automatic (UPnP)": "1. Automático (UPnP)",
  "100 = everyone must sleep, 1 = one player is enough": "100 = todos deben dormir, 1 = basta con uno",
  "2. Manual setup (if automatic fails)": "2. Configuración manual (si falla la automática)",
+ "3D background could not start: {0}\nDetails: {1}": "No se pudo iniciar el fondo 3D: {0}\nDetalles: {1}",
  "3D background quality": "Calidad del fondo 3D",
  "3D background quality (High → Normal → Off)": "Calidad del fondo 3D (Alta → Normal → Desactivado)",
  "3D view follows the mouse": "La vista 3D sigue al ratón",

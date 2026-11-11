@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.2
+
+- A failed 3D start is no longer saved as "Off": the installer tries again on the next launch, and
+  clicking "3D effects" retries right away.
+- The "3D effects: not supported" button now shows the reason; details are written to
+  `~/.mc_server_installer/gl_error.log`.
+- Release builds are now tested with a real (software) OpenGL renderer before they are published.
+
 ## 1.0.1
 
 - Windows release builds: a single-file `.exe`, a portable zip and a source zip are attached to each
