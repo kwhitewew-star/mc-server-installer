@@ -5,7 +5,9 @@
 마인크래프트 자바 에디션 서버를 단계별로 설치하는 데스크톱 프로그램입니다. 서버 종류와 버전을 고르고
 원하는 만큼 설정을 바꾸면, 파일 다운로드와 설정 파일 작성, 공유기 포트 열기, 첫 실행 확인까지 알아서 합니다.
 
-![MC Server Installer](docs/screenshots/hero.jpg)
+![서버 종류별 애니메이션](docs/screenshots/server-animations.webp)
+
+*서버 종류마다 고유한 애니메이션이 나옵니다. Paper는 종이비행기, CraftBukkit은 용암 양동이, Fabric은 천, Forge는 모루, Purpur는 블록, Arclight는 번개.*
 
 ## 기능
 
@@ -69,6 +71,10 @@ python run.py            # 또는: python -m mcsi
 
 버전 목록이 안 뜨면 `selftest.bat`(또는 `python scripts/selftest.py`)을 실행하세요. 모든 서버 종류의 API를
 확인하고 결과를 `selftest_result.txt`에 저장합니다. 버그를 알릴 때 첨부하면 좋습니다.
+
+## 피드백
+
+버그를 찾았거나 아이디어가 있으면 [이슈를 남겨 주세요](https://github.com/kwhitewew-star/mc-server-installer/issues/new/choose). 버그 신고와 기능 제안 양식이 있고, 한국어로 써도 됩니다.
 
 ## 개발
 

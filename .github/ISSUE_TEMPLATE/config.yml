@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 🌐 Help translate / 번역 돕기
+    url: https://github.com/kwhitewew-star/mc-server-installer#translations
+    about: How to add or fix a language. / 언어를 추가하거나 고치는 방법

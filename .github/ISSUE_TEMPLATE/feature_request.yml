@@ -1,0 +1,39 @@
+name: 💡 Feature request / 기능 제안
+description: An idea to make the installer better. / 설치기를 더 좋게 만들 아이디어
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: English or Korean are both fine. / 영어, 한국어 모두 괜찮아요.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What would you like to do? / 무엇을 하고 싶나요?
+      description: The situation or problem behind the idea. / 이 아이디어가 나온 상황이나 불편한 점
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: Your idea / 아이디어
+      description: How should it work? / 어떻게 동작하면 좋을까요?
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind / 종류
+      options:
+        - New server type / 새 서버 종류
+        - New setting / 새 설정 항목
+        - Server management (start, stop, console, backups) / 서버 관리
+        - Mods & plugins / 모드·플러그인
+        - Port forwarding / 포트포워딩
+        - New language / 새 언어
+        - Graphics & animation / 그래픽·애니메이션
+        - Other / 기타
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else? / 그 밖에
+      description: Links, screenshots, other tools that do this well. / 참고 링크, 스크린샷, 이걸 잘하는 다른 프로그램

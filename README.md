@@ -6,7 +6,9 @@ A step-by-step desktop installer for Minecraft Java Edition servers. You pick a 
 adjust as many or as few settings as you like, and it downloads everything, writes the config, opens your
 router's port and starts the server once to check that it works.
 
-![MC Server Installer](docs/screenshots/hero.jpg)
+![Server type animations](docs/screenshots/server-animations.webp)
+
+*Each server type plays its own animation: Paper's paper plane, CraftBukkit's lava bucket, Fabric's cloth, Forge's anvil, Purpur's blocks, Arclight's lightning.*
 
 ## Features
 
@@ -98,6 +100,10 @@ mcsi/
 scripts/       selftest.py, screenshots.py, i18n_sync.py, build_exe.py
 tests/         offline tests with fake APIs and a fake Java
 ```
+
+## Feedback
+
+Found a bug or have an idea? [Open an issue](https://github.com/kwhitewew-star/mc-server-installer/issues/new/choose): there are forms for bug reports and feature requests (English or Korean).
 
 ## Development
 

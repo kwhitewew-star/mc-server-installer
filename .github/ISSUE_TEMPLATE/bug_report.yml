@@ -1,0 +1,88 @@
+name: 🐞 Bug report / 버그 신고
+description: Something doesn't work. / 뭔가 제대로 안 돼요.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! English or Korean are both fine. / 영어, 한국어 모두 괜찮아요.
+        If version lists don't load, please run `selftest.bat` (source version) and attach `selftest_result.txt`.
+        버전 목록이 안 뜨면 `selftest.bat`(소스 버전)을 실행하고 `selftest_result.txt`를 첨부해 주세요.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened? / 무슨 일이 있었나요?
+      description: What did you expect, and what happened instead? / 기대한 것과 실제로 일어난 일
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce / 재현 방법
+      placeholder: |
+        1. Standard mode / 중간 모드
+        2. Paper 26.3
+        3. Click Install / 설치 클릭
+        4. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: server
+    attributes:
+      label: Server type / 서버 종류
+      options: [Not related / 관계없음, Vanilla, Paper, Purpur, Folia, Spigot, Bukkit, Fabric, Quilt, Legacy Fabric,
+                Babric, Forge, NeoForge, Mohist, Youer, Arclight, Banner]
+    validations:
+      required: true
+  - type: input
+    id: mc
+    attributes:
+      label: Minecraft version / 마인크래프트 버전
+      placeholder: "e.g. 26.3, 1.21.1"
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where? / 어디서?
+      multiple: true
+      options:
+        - Version / build list / 버전·빌드 목록
+        - Mods & plugins (Modrinth) / 모드·플러그인
+        - Java detection or download / Java 찾기·설치
+        - Installing / 설치 중
+        - First run / 첫 실행
+        - Port forwarding (UPnP or guide) / 포트포워딩
+        - Graphics / UI / 그래픽·화면
+        - Translation / 번역
+        - Other / 기타
+  - type: textarea
+    id: log
+    attributes:
+      label: Log / 로그
+      description: |
+        The install log is `install.log` in the server folder, or click "Show log" on the install step.
+        설치 로그는 서버 폴더의 `install.log`에 있거나, 설치 단계의 "로그 보기"에서 볼 수 있어요.
+      render: text
+  - type: dropdown
+    id: build
+    attributes:
+      label: How do you run it? / 실행 방식
+      options: [".exe", "portable zip", "source (run.bat / run.py)"]
+    validations:
+      required: true
+  - type: input
+    id: app_version
+    attributes:
+      label: Installer version / 설치기 버전
+      placeholder: "e.g. 1.0.1"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS / 운영체제
+      placeholder: "e.g. Windows 11 23H2"
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots / 스크린샷
+      description: Drag images here. / 이미지를 끌어다 놓으세요.
