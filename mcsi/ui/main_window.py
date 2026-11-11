@@ -753,7 +753,7 @@ def main():
         def finish():
             w.grab().save(shot)
             if w.gl and w.gl.ok:
-                status = "gl ok: " + getattr(w.gl, "renderer", "?")
+                status = "gl ok: " + getattr(w.gl, "renderer", "?") + " | dll: " + (getattr(w.gl, "gl_dll", "") or "default")
             else:
                 status = "gl failed: " + (w.gl_error or "not started")
             Path(shot).with_suffix(".txt").write_text(status, encoding="utf-8")

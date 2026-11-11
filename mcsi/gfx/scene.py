@@ -6,6 +6,7 @@ from ..i18n import _
 import colorsys
 import ctypes
 import math
+import sys
 import time
 import traceback
 from typing import Callable
@@ -36,6 +37,46 @@ def gl_text(value) -> str:
         except TypeError:
             value = bytes(ctypes.string_at(ctypes.addressof(value)))
     return bytes(value).split(b"\0", 1)[0].decode("utf-8", errors="replace")
+
+
+def use_qt_opengl_dll() -> str:
+    """On Windows, make PyOpenGL load the same OpenGL DLL that Qt is rendering with.
+
+    PyOpenGL looks up "opengl32" on PATH, which finds C:\\Windows\\System32\\opengl32.dll. Qt may be
+    using a different one: its software fallback opengl32sw.dll (VMs, remote desktop, weak drivers) or
+    an opengl32.dll next to the .exe. Two different DLLs means PyOpenGL can't find functions such as
+    glGenVertexArrays for Qt's context ("NullFunctionError"). Must run before OpenGL is first imported,
+    while Qt's context is current. Returns the DLL path that was chosen ("" if nothing changed).
+    """
+    if sys.platform != "win32" or "OpenGL.GL" in sys.modules:
+        return ""
+    try:
+        import ctypes.util
+        k32 = ctypes.WinDLL("kernel32")
+        k32.GetModuleHandleW.restype = ctypes.c_void_p
+        k32.GetModuleHandleW.argtypes = [ctypes.c_wchar_p]
+        k32.GetModuleFileNameW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_uint32]
+        path = ""
+        for name in ("opengl32sw.dll", "opengl32.dll"):
+            handle = k32.GetModuleHandleW(name)
+            if handle:
+                buf = ctypes.create_unicode_buffer(1024)
+                if k32.GetModuleFileNameW(handle, buf, 1024):
+                    path = buf.value
+                    break
+        if not path:
+            return ""
+        original = ctypes.util.find_library
+
+        def find_library(name):
+            if name.lower() in ("opengl32", "opengl32.dll"):
+                return path
+            return original(name)
+
+        ctypes.util.find_library = find_library
+        return path
+    except Exception:  # noqa: BLE001 - best effort; fall back to PyOpenGL's own lookup
+        return ""
 
 
 QUALITY = {
@@ -185,7 +226,7 @@ class GLBackground(QOpenGLWidget):
 
     # ---------------------------------------------------------------- GL
     def _fail(self, where: str) -> None:
-        msg = f"{where}: {traceback.format_exc()}"
+        msg = f"{where} (OpenGL DLL: {getattr(self, 'gl_dll', '') or 'default'}): {traceback.format_exc()}"
         self.dead = True
         self.timer.stop()
         try:
@@ -212,6 +253,7 @@ class GLBackground(QOpenGLWidget):
 
     def initializeGL(self):  # noqa: N802
         try:
+            self.gl_dll = use_qt_opengl_dll()
             from OpenGL import GL
             self.GL = GL
             self.vao = GL.glGenVertexArrays(1)
