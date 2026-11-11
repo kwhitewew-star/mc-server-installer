@@ -2,6 +2,8 @@
 
 ## 1.0.2
 
+- Fixed: the 3D (OpenGL) background did not start in the 1.0.1 `.exe` ("3D effects: not supported").
+  The bundled PyOpenGL 3.1.10 returns uniform names as a byte array on Windows, which the code did not expect.
 - A failed 3D start is no longer saved as "Off": the installer tries again on the next launch, and
   clicking "3D effects" retries right away.
 - The "3D effects: not supported" button now shows the reason; details are written to

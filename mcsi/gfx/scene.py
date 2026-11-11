@@ -18,6 +18,26 @@ from .anims import ANIM_BURST, ANIM_CENTER, ANIM_DUR, ANIM_ID, DEFAULT_DUR
 from .shaders import COMPOSITE_FS, FULLSCREEN_VS, PARTICLE_FS, PARTICLE_VS, SCENE_FS
 from ..core.java import APP_DIR
 
+def gl_text(value) -> str:
+    """Turn whatever PyOpenGL returns for a GL string into str.
+
+    Depending on the PyOpenGL version and platform this is bytes, str, a ctypes char array or a
+    ctypes c_byte array (seen on Windows with PyOpenGL 3.1.10), possibly with trailing NULs.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.split("\0", 1)[0]
+    if not isinstance(value, (bytes, bytearray)):
+        try:
+            value = bytes(value)                     # ctypes arrays of c_char / c_byte / c_ubyte
+        except ValueError:                           # c_byte holds negative numbers for non-ASCII bytes
+            value = bytes(b & 0xFF for b in value)
+        except TypeError:
+            value = bytes(ctypes.string_at(ctypes.addressof(value)))
+    return bytes(value).split(b"\0", 1)[0].decode("utf-8", errors="replace")
+
+
 QUALITY = {
     "high": {"scale": 0.75, "steps": 140, "particles": 1400, "blur": 0.9},
     "normal": {"scale": 0.5, "steps": 96, "particles": 800, "blur": 0.4},
@@ -183,11 +203,11 @@ class GLBackground(QOpenGLWidget):
             GL.glShaderSource(sh, src)
             GL.glCompileShader(sh)
             if not GL.glGetShaderiv(sh, GL.GL_COMPILE_STATUS):
-                raise RuntimeError(_("Shader compile failed:\n") + GL.glGetShaderInfoLog(sh).decode(errors="replace"))
+                raise RuntimeError(_("Shader compile failed:\n") + gl_text(GL.glGetShaderInfoLog(sh)))
             GL.glAttachShader(prog, sh)
         GL.glLinkProgram(prog)
         if not GL.glGetProgramiv(prog, GL.GL_LINK_STATUS):
-            raise RuntimeError(_("Shader link failed:\n") + GL.glGetProgramInfoLog(prog).decode(errors="replace"))
+            raise RuntimeError(_("Shader link failed:\n") + gl_text(GL.glGetProgramInfoLog(prog)))
         return prog
 
     def initializeGL(self):  # noqa: N802
@@ -203,9 +223,9 @@ class GLBackground(QOpenGLWidget):
             for name, prog in (("s", self.p_scene), ("p", self.p_part), ("c", self.p_comp)):
                 n = GL.glGetProgramiv(prog, GL.GL_ACTIVE_UNIFORMS)
                 for i in range(n):
-                    uname = GL.glGetActiveUniform(prog, i)[0].decode().split("[")[0]
+                    uname = gl_text(GL.glGetActiveUniform(prog, i)[0]).split("[")[0]
                     self.loc[(name, uname)] = GL.glGetUniformLocation(prog, uname)
-            self.renderer = GL.glGetString(GL.GL_RENDERER).decode(errors="replace")
+            self.renderer = gl_text(GL.glGetString(GL.GL_RENDERER))
             self.ok = True
         except Exception:
             self._fail("initializeGL")
