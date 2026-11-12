@@ -30,8 +30,8 @@ SEP = os.pathsep        # PyInstaller --add-data uses ';' on Windows and ':' els
 
 
 def version_file() -> Path:
-    nums = (__version__.split(".") + ["0", "0", "0"])[:3]
-    v = ", ".join(nums + ["0"])
+    nums = [n for n in __version__.split(".") if n.isdigit()]
+    v = ", ".join((nums + ["0"] * 4)[:4])        # Windows file version has 4 parts (1.0.4.1 fits)
     text = f"""VSVersionInfo(
   ffi=FixedFileInfo(filevers=({v}), prodvers=({v})),
   kids=[StringFileInfo([StringTable('040904B0', [

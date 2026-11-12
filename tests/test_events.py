@@ -111,6 +111,7 @@ def test_jar_runs_if_java_available(tmp_path):
 
 def test_versions():
     assert update.is_newer("1.0.10", "1.0.9")
+    assert update.is_newer("1.0.4.1", "1.0.4") and update.is_newer("1.0.5", "1.0.4.1")
     assert update.is_newer("v2.0", "1.9.9")
     assert not update.is_newer("1.0.2", "1.0.2")
     assert not update.is_newer("1.0.1", "1.0.2")

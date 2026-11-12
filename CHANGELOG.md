@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.4.1
+
+- Fixed: long release notes in the update notice were cut off at the bottom and could not be scrolled.
+  They are now shown formatted, in a scrollable box.
+
 ## 1.0.4
 
 - New: **picture guide for manual port forwarding**. Twelve drawn steps, each filled in with your own router

@@ -8,7 +8,7 @@ import random
 from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer, QUrl, QVariantAnimation, pyqtSignal
 from PyQt6.QtGui import (QBrush, QColor, QDesktopServices, QFont, QLinearGradient, QPainter, QPainterPath, QPen,
                          QRadialGradient)
-from PyQt6.QtWidgets import QGraphicsOpacityEffect, QHBoxLayout, QWidget
+from PyQt6.QtWidgets import QFrame, QGraphicsOpacityEffect, QHBoxLayout, QTextBrowser, QWidget
 
 from .. import __version__
 from ..core import events as ev
@@ -84,8 +84,14 @@ class UpdateNotice(Overlay):
         self.head = wrap_label("", "")
         self.head.setTextFormat(Qt.TextFormat.RichText)
         self.body.addWidget(self.head)
-        self.notes = wrap_label("", "muted")
-        self.notes.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        # release notes: rendered markdown in a scroll area (long notes used to be cut off at the bottom)
+        self.notes = QTextBrowser()
+        self.notes.setOpenExternalLinks(True)
+        self.notes.setFrameShape(QFrame.Shape.NoFrame)
+        self.notes.setStyleSheet("QTextBrowser { background: transparent; color: #c7cee3; }")
+        self.notes.viewport().setAutoFillBackground(False)
+        self.notes.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.notes.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.body.addWidget(self.notes, 1)
         row = QHBoxLayout()
         self.skip = Button(_("Skip this version"))
@@ -100,9 +106,9 @@ class UpdateNotice(Overlay):
     def show_release(self, rel: Release):
         self.rel = rel
         self.head.setText(_("<b>Version {0}</b> is out. You have {1}.").format(rel.version, __version__))
-        lines = [ln.strip() for ln in rel.notes.splitlines() if ln.strip() and not ln.lstrip().startswith("#")]
-        text = "\n".join(lines[:10]) + ("\n…" if len(lines) > 10 else "")
-        self.notes.setText(text.replace("**", "") or _("See the release page for what's new."))
+        md = "\n".join(ln for ln in rel.notes.splitlines() if not ln.lstrip().startswith("## "))
+        self.notes.setMarkdown(md.strip() or _("See the release page for what's new."))
+        self.notes.verticalScrollBar().setValue(0)
         self.open_anim()
 
     def _download(self):
