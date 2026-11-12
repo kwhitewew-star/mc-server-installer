@@ -87,6 +87,8 @@ class State:
         for k, v in d.get("values", {}).items():
             spec = schema.BY_KEY.get(k)
             if spec and isinstance(v, type(spec.default)):
+                if spec.type == "int" and not isinstance(v, bool):
+                    v = max(spec.min, min(spec.max, v))     # e.g. a port saved before limits existed
                 s.values[k] = v
         if s.mode not in MODE_STEPS:
             s.mode = "standard"

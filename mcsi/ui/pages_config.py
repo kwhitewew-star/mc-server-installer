@@ -12,7 +12,7 @@ from PyQt6.QtGui import QGuiApplication, QImage
 from PyQt6.QtWidgets import (QButtonGroup, QFileDialog, QGridLayout, QHBoxLayout, QLineEdit, QPlainTextEdit,
                              QScrollArea, QVBoxLayout, QWidget)
 
-from ..core import schema
+from ..core import ports, schema, upnp
 from ..core.installer import Installer, Plan, rule_commands, split_names
 from ..core.java import APP_DIR
 from ..core.net import Cancelled
@@ -406,17 +406,21 @@ class SummaryPage(Page):
         if st.values.get("white-list") and not split_names(st.values.get("manage:whitelist", "")) and \
                 not split_names(st.values.get("manage:ops", "")):
             w.append(_("The whitelist is on but no players are listed. Nobody will be able to join."))
+        perr, pwarn = ports.problems(st.values)
+        w += perr + pwarn
         if Path(st.folder).expanduser().is_dir() and any(Path(st.folder).expanduser().iterdir()):
             w.append(_("The install folder already has files. Server files will be overwritten."))
         self.warns.setText("".join(f"<div style='color:{WARN}; margin:3px 0'>⚠ {x}</div>" for x in w))
 
     def can_next(self):
-        return self.st.eula or bool(self.st.event)
+        if self.st.event:
+            return True
+        return self.st.eula and not ports.problems(self.st.values)[0]
 
 
 # ------------------------------------------------------------------ Install
 STAGES = [_("Checking Java"), _("Downloading server files"), _("Downloading mods · plugins"), _("Writing config files"), _("Preparing extras"), _("First run · world generation"),
-          _("Port forwarding (UPnP)"), _("Finishing")]
+          _("Port forwarding · firewall"), _("Finishing")]
 
 
 class Worker(QThread):
@@ -580,7 +584,7 @@ class InstallPage(Page):
             self.rows[2].set("skip")
         if not st.values.get("manage:first_run", True):
             self.rows[5].set("skip")
-        if not st.values.get("manage:upnp", True):
+        if not st.values.get("manage:upnp", True) and not (os.name == "nt" and st.values.get("manage:firewall_auto", True)):
             self.rows[6].set("skip")
         self.forward = None
         self.bar.set_value(0)
@@ -741,15 +745,21 @@ class DonePage(Page):
                       "<span style='color:{2}'>{3}</span>").format(ACCENT, '' if port == 25565 else f':{port}', ACCENT,
                                                                    self._addr)
             if forward is not None and forward.ok and forward.external_ip:
-                ext = forward.external_ip if port == 25565 else f"{forward.external_ip}:{port}"
+                eport = forward.ext_ports.get(f"{port}/TCP", port)
+                ext = forward.external_ip if eport == 25565 else f"{forward.external_ip}:{eport}"
                 outside = _("<b>Outside (internet)</b>  <span style='color:{0}'>{1}</span>  <span style='color:{2}'>"
-                            "· ports opened automatically (UPnP)</span>").format(ACCENT, ext, OK)
+                            "· ports opened automatically ({3})</span>").format(ACCENT, ext, OK,
+                                                                               upnp.methods_text(forward.methods) or "UPnP")
             elif forward is not None:
                 outside = "<span style='color:{0}'>{1}</span>".format(WARN, _(
                     "Automatic port forwarding did not work. Click 'Port forwarding' for step-by-step instructions."))
             else:
                 outside = "<span style='color:{0}'>{1}</span>".format(MUTED, _(
                     "For players outside your network, the port must be forwarded. Click 'Port forwarding' for help."))
+            if forward is not None and forward.firewall is False:
+                outside += "<br><span style='color:{0}'>{1}</span>".format(WARN, _(
+                    "Windows Firewall rules were not added. Run open_firewall.bat in the server folder as "
+                    "administrator, or friends cannot connect."))
             self.addr.setText(local + "<br>" + outside)
             files = _("Run with start.bat · back up with backup.bat · install log in install.log")
             self.extra.setText("<br>".join([files] + [str(s) for s in summary]))

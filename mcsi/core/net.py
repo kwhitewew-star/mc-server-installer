@@ -45,18 +45,18 @@ def _switch_to_certifi() -> bool:
     return True
 
 
-def _open(url: str, timeout: float, method: str = "GET"):
+def _open(url: str, timeout: float, method: str = "GET", headers: Optional[dict] = None):
     req = urllib.request.Request(url, method=method, headers={
-        "User-Agent": USER_AGENT, "Accept": "*/*"})
+        "User-Agent": USER_AGENT, "Accept": "*/*", **(headers or {})})
     return urllib.request.urlopen(req, timeout=timeout, context=_context())
 
 
-def open_url(url: str, timeout: float = 30, retries: int = 3, method: str = "GET"):
+def open_url(url: str, timeout: float = 30, retries: int = 3, method: str = "GET", headers: Optional[dict] = None):
     last: Exception | None = None
     tried_certifi = False
     for attempt in range(retries):
         try:
-            return _open(url, timeout, method)
+            return _open(url, timeout, method, headers)
         except urllib.error.HTTPError as e:
             if e.code in (404, 410):
                 raise NetError(f"HTTP {e.code}: {url}") from e
@@ -112,30 +112,84 @@ def clear_cache() -> None:
     _cache.clear()
 
 
+STALL_SEC = 20          # no data for this long -> reconnect and resume
+RESUMES = 5
+
+
 def download(url: str, dest: Path, on_progress: Optional[Callable[[int, int], None]] = None,
              is_cancelled: Callable[[], bool] = lambda: False,
-             sha256: str = "", sha1: str = "", md5: str = "", sha512: str = "") -> None:
-    """Stream a download and verify the checksum if given. Deletes the .part file on failure."""
+             sha256: str = "", sha1: str = "", md5: str = "", sha512: str = "",
+             log: Optional[Callable[[str], None]] = None) -> None:
+    """Stream a download and verify the checksum if given. Deletes the .part file on failure.
+
+    Like download managers do: if the server stops sending (STALL_SEC without data) or the connection
+    drops, it reconnects and continues where it stopped (HTTP Range), up to RESUMES times. Progress and
+    speed go to ``log`` every ~10%."""
     dest.parent.mkdir(parents=True, exist_ok=True)
     part = dest.with_name(dest.name + ".part")
     hashers = {k: hashlib.new(k) for k, v in (("sha512", sha512), ("sha256", sha256), ("sha1", sha1), ("md5", md5))
                if v}
+    done, total, resumes = 0, 0, 0
+    t0 = time.time()
+    next_log = 0.1
     try:
-        with open_url(url, timeout=60) as resp, open(part, "wb") as f:
-            total = int(resp.headers.get("Content-Length") or 0)
-            done = 0
+        with open(part, "wb") as f:
             while True:
-                if is_cancelled():
-                    raise Cancelled()
-                chunk = resp.read(128 * 1024)
-                if not chunk:
-                    break
-                f.write(chunk)
-                for h in hashers.values():
-                    h.update(chunk)
-                done += len(chunk)
-                if on_progress:
-                    on_progress(done, total)
+                headers = {"Range": f"bytes={done}-"} if done else None
+                try:
+                    resp = open_url(url, timeout=STALL_SEC, headers=headers)
+                except NetError:
+                    if not done or resumes >= RESUMES:
+                        raise
+                    resumes += 1
+                    continue
+                with resp:
+                    if done and getattr(resp, "status", 200) != 206:   # server ignores Range: start over
+                        done = 0
+                        f.seek(0)
+                        f.truncate()
+                        hashers = {k: hashlib.new(k) for k in hashers}
+                    if not total:
+                        length = int(resp.headers.get("Content-Length") or 0)
+                        total = length + done if length else 0
+                    try:
+                        while True:
+                            if is_cancelled():
+                                raise Cancelled()
+                            chunk = resp.read(128 * 1024)
+                            if not chunk:
+                                break
+                            f.write(chunk)
+                            for h in hashers.values():
+                                h.update(chunk)
+                            done += len(chunk)
+                            if on_progress:
+                                on_progress(done, total)
+                            if log and total and done / total >= next_log:
+                                speed = done / max(0.1, time.time() - t0)
+                                left = (total - done) / max(1.0, speed)
+                                eta = _("{0} min").format(round(left / 60)) if left >= 90 else _("{0} s").format(round(left))
+                                log(_("  {0:.1f} / {1:.1f} MB ({2:.2f} MB/s · about {3} left)").format(
+                                    done / 1048576, total / 1048576, speed / 1048576, eta))
+                                next_log += 0.1
+                    except (TimeoutError, ConnectionError, OSError, urllib.error.URLError) as e:
+                        if resumes >= RESUMES:
+                            raise NetError(_("Download of {0} stopped: {1}").format(dest.name, describe(e))) from e
+                        resumes += 1
+                        if log:
+                            log(_("  The server stopped sending ({0}). Reconnecting and continuing from {1:.1f} MB "
+                                  "({2}/{3})...").format(describe(e), done / 1048576, resumes, RESUMES))
+                        continue
+                if total and done < total:              # connection closed early
+                    if resumes >= RESUMES:
+                        raise NetError(_("Download of {0} stopped: {1}").format(
+                            dest.name, _("connection closed early")))
+                    resumes += 1
+                    if log:
+                        log(_("  Connection closed early. Continuing from {0:.1f} MB ({1}/{2})...").format(
+                            done / 1048576, resumes, RESUMES))
+                    continue
+                break
         expected = {"sha512": sha512, "sha256": sha256, "sha1": sha1, "md5": md5}
         for k, h in hashers.items():
             if h.hexdigest().lower() != expected[k].lower():

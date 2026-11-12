@@ -46,6 +46,9 @@ class Router:
                 if action == "AddPortMapping":
                     if router.fail_code:
                         return self._send(500, FAULT.format(code=router.fail_code))
+                    old = router.mappings.get((arg["NewExternalPort"], arg["NewProtocol"]))
+                    if old and old["NewInternalClient"] != arg["NewInternalClient"]:
+                        return self._send(500, FAULT.format(code=718))
                     if router.reject_lease0 and arg["NewLeaseDuration"] == "0":
                         return self._send(500, FAULT.format(code=725))
                     router.mappings[(arg["NewExternalPort"], arg["NewProtocol"])] = arg
@@ -54,7 +57,14 @@ class Router:
                     m = router.mappings.get((arg["NewExternalPort"], arg["NewProtocol"]))
                     if not m:
                         return self._send(500, FAULT.format(code=714))
-                    return self._ok(action, f"<NewInternalClient>{m['NewInternalClient']}</NewInternalClient>")
+                    return self._ok(action, f"<NewInternalClient>{m['NewInternalClient']}</NewInternalClient>"
+                                            f"<NewPortMappingDescription>{m['NewPortMappingDescription']}"
+                                            "</NewPortMappingDescription>")
+                if action == "DeletePortMapping":
+                    router.mappings.pop((arg["NewExternalPort"], arg["NewProtocol"]), None)
+                    return self._ok(action, "")
+                if action == "GetStatusInfo":
+                    return self._ok(action, "<NewConnectionStatus>Connected</NewConnectionStatus>")
                 self._send(500, FAULT.format(code=401))
 
             def _ok(self, action, inner):
@@ -79,6 +89,12 @@ class Router:
 
     def close(self):
         self.server.shutdown()
+
+
+@pytest.fixture(autouse=True)
+def private_lan(monkeypatch):
+    """Pretend this PC sits behind a home router (the test machine may have any address)."""
+    monkeypatch.setattr(upnp, "_local_ip_towards", lambda host: host if host.startswith("127.") else "192.168.0.23")
 
 
 @pytest.fixture
@@ -137,3 +153,136 @@ def test_port_rules():
 def test_private_ranges():
     assert upnp.is_private("192.168.0.1") and upnp.is_private("100.100.0.1") and upnp.is_private("10.1.2.3")
     assert not upnp.is_private("8.8.8.8") and not upnp.is_private("203.0.113.7")
+
+
+# ---------------------------------------------------------------- 718: our own stale mapping is replaced
+def _old(port, client, desc):
+    return {"NewExternalPort": str(port), "NewProtocol": "TCP", "NewInternalClient": client,
+            "NewPortMappingDescription": desc}
+
+
+def test_replaces_own_stale_mapping(router):
+    r = router()
+    gw = r.gateway()
+    r.mappings[("25565", "TCP")] = _old(25565, "192.168.0.99", "My Server")       # this PC's old IP
+    res = upnp.forward_ports([(25565, "TCP")], "My Server", gateway=gw, pmp=False, windows_api=False)
+    assert res.ok and r.mappings[("25565", "TCP")]["NewInternalClient"] == gw.local_ip
+
+
+def test_keeps_someone_elses_mapping(router):
+    r = router()
+    gw = r.gateway()
+    r.mappings[("25565", "TCP")] = _old(25565, "192.168.0.50", "Other PC")
+    res = upnp.forward_ports([(25565, "TCP")], "My Server", gateway=gw, pmp=False, windows_api=False)
+    assert not res.ok and r.mappings[("25565", "TCP")]["NewInternalClient"] == "192.168.0.50"
+    assert any("718" in e for e in res.errors)
+
+
+# ---------------------------------------------------------------- PCP / NAT-PMP against a fake gateway
+class PmpServer:
+    """Answers PCP MAP (or only NAT-PMP when pcp=False) on a localhost UDP port."""
+
+    def __init__(self, pcp=True, ext_port_offset=0):
+        import socket
+        import struct
+        self.pcp, self.off = pcp, ext_port_offset
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock.bind(("127.0.0.1", 0))
+        self.port = self.sock.getsockname()[1]
+        self.maps = []
+        self.struct = struct
+        threading.Thread(target=self.serve, daemon=True).start()
+
+    def serve(self):
+        st = self.struct
+        while True:
+            try:
+                d, addr = self.sock.recvfrom(1100)
+            except OSError:
+                return
+            if d[0] == 2:
+                if not self.pcp:                     # NAT-PMP-only gateway: "unsupported version"
+                    self.sock.sendto(st.pack("!BBHI", 0, 128, 1, 0), addr)
+                    continue
+                nonce, proto = d[24:36], d[36]
+                iport = st.unpack("!H", d[40:42])[0]
+                self.maps.append(("PCP", iport, proto))
+                resp = (st.pack("!BBBBII", 2, 0x81, 0, 0, 7200, 1) + bytes(12) + nonce
+                        + st.pack("!B3xHH", proto, iport, iport + self.off)
+                        + bytes(10) + b"\xff\xff" + bytes([203, 0, 113, 9]))
+                self.sock.sendto(resp, addr)
+            elif d[1] == 0:
+                self.sock.sendto(st.pack("!BBHI", 0, 128, 0, 1) + bytes([203, 0, 113, 9]), addr)
+            else:
+                _v, op, _r, iport, eport, life = st.unpack("!BBHHHI", d[:12])
+                self.maps.append(("PMP", iport, op))
+                self.sock.sendto(st.pack("!BBHIHHI", 0, 128 + op, 0, 1, iport, eport + self.off, 3600), addr)
+
+    def close(self):
+        self.sock.close()
+
+
+@pytest.fixture
+def pmp():
+    made = []
+
+    def make(**kw):
+        s = PmpServer(**kw)
+        made.append(s)
+        return s
+    yield make
+    for s in made:
+        s.close()
+
+
+def test_pcp_map(pmp):
+    s = pmp()
+    eport, eip, life = upnp.pcp_map("127.0.0.1", "192.168.0.23", 25565, "TCP", pmp_port=s.port)
+    assert (eport, eip, life) == (25565, "203.0.113.9", 7200) and s.maps == [("PCP", 25565, 6)]
+
+
+def test_natpmp_map(pmp):
+    s = pmp(pcp=False)
+    assert upnp.natpmp_map("127.0.0.1", 19132, "UDP", pmp_port=s.port) == (19132, 3600)
+    assert upnp.natpmp_external_ip("127.0.0.1", s.port) == "203.0.113.9"
+
+
+def test_falls_back_to_pcp_when_upnp_fails(router, pmp, monkeypatch):
+    r = router(fail_code=606)
+    s = pmp()
+    monkeypatch.setattr(upnp, "default_gateway", lambda: "127.0.0.1")
+    res = upnp.forward_ports([(25565, "TCP"), (19132, "UDP")], gateway=r.gateway(), windows_api=False,
+                             pmp_port=s.port)
+    assert res.ok and res.methods == ["PCP"] and sorted(res.opened) == ["19132/UDP", "25565/TCP"]
+    assert res.external_ip == "203.0.113.7"
+
+
+def test_natpmp_only_gateway_and_remapped_port(pmp, monkeypatch):
+    s = pmp(pcp=False, ext_port_offset=1)
+    monkeypatch.setattr(upnp, "find_gateway", lambda **k: None)
+    monkeypatch.setattr(upnp, "default_gateway", lambda: "127.0.0.1")
+    res = upnp.forward_ports([(25565, "TCP")], windows_api=False, pmp_port=s.port)
+    assert res.ok and res.methods == ["NAT-PMP"] and res.ext_ports == {"25565/TCP": 25566}
+    assert res.external_ip == "203.0.113.9"
+
+
+def test_nothing_answers_is_quick(monkeypatch):
+    import time
+    monkeypatch.setattr(upnp, "find_gateway", lambda **k: None)
+    monkeypatch.setattr(upnp, "default_gateway", lambda: "127.0.0.1")
+    t = time.time()
+    res = upnp.forward_ports([(25565, "TCP"), (19132, "UDP"), (24454, "UDP")], windows_api=False, pmp_port=9)
+    assert not res.ok and time.time() - t < 6         # gives up on 5351 after the first rule
+
+
+def test_local_ipv4s_has_no_loopback():
+    assert all(not ip.startswith("127.") for ip in upnp.local_ipv4s())
+
+
+def test_public_ip_needs_no_forwarding(monkeypatch):
+    monkeypatch.setattr(upnp, "_local_ip_towards", lambda host: "112.167.115.20")
+    monkeypatch.setattr(upnp, "default_gateway", lambda: "112.167.115.1")
+    monkeypatch.setattr(upnp, "find_gateway", lambda **k: (_ for _ in ()).throw(AssertionError("no search")))
+    res = upnp.forward_ports([(19832, "TCP")], windows_api=False)
+    assert res.ok and res.methods == [upnp.DIRECT] and res.external_ip == "112.167.115.20"
+    assert res.opened == ["19832/TCP"] and "router" in upnp.methods_text(res.methods)

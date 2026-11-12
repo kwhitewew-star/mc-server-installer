@@ -24,7 +24,7 @@ from . import schema
 from .java import NO_WINDOW, WINDOWS, probe
 from .net import Cancelled, NetError, download, get_json
 from .providers import PROVIDERS, Launch
-from . import upnp
+from . import upnp, winfw
 from .versions import props_moved_to_gamerules, uses_snake_gamerules
 
 AIKAR = ["-XX:+UseG1GC", "-XX:+ParallelRefProcEnabled", "-XX:MaxGCPauseMillis=200",
@@ -149,7 +149,7 @@ class Installer:
     def download(self, url, dest, sha256="", sha1="", md5=""):
         self.log(f"↓ {url}")
         download(url, Path(dest), lambda d, t: self.sub(d / t if t else 0.5), self.is_cancelled,
-                 sha256=sha256, sha1=sha1, md5=md5)
+                 sha256=sha256, sha1=sha1, md5=md5, log=self.log)
         if sha256 or sha1 or md5:
             self.log(_("  ✓ Checksum verified"))
 
@@ -218,9 +218,14 @@ class Installer:
         if first:
             self.stage(5, _("First run (world generation)"), 72, 95)
             self.first_run(launch, args)
-        if v.get("manage:upnp", True):
-            self.stage(6, _("Port forwarding (UPnP)"), 95, 99)
-            self.forward_ports()
+        fw_auto = WINDOWS and v.get("manage:firewall_auto", True)
+        if v.get("manage:upnp", True) or fw_auto:
+            self.stage(6, _("Port forwarding · firewall"), 95, 99)
+            fw_ok = winfw.ensure_rules([(p_, pr) for p_, pr, _why in self.rules], self.log) if fw_auto else None
+            if v.get("manage:upnp", True):
+                self.forward_ports()
+            if self.forward is not None:
+                self.forward.firewall = fw_ok
         self.stage(7, _("Finishing"), 99, 100)
         (self.folder / "mcsi_install.json").write_text(json.dumps({
             "server": p.server, "mc": p.mc, "build": p.build, "java": self.java, "ram_gb": p.ram_gb,
@@ -360,8 +365,7 @@ class Installer:
             fw = ["@echo off", "net session >nul 2>&1 || (powershell -NoProfile -Command \"Start-Process "
                   "'%~f0' -Verb RunAs\" & exit /b)"]
             for rport, proto, _why in self.rules:
-                fw.append(f'netsh advfirewall firewall add rule name="Minecraft Server {rport} {proto}" '
-                          f"dir=in action=allow protocol={proto} localport={rport}")
+                fw.append(winfw.add_command(rport, proto))
             fw.append("pause")
             (self.folder / "open_firewall.bat").write_bytes(("\r\n".join(fw) + "\r\n").encode("utf-8"))
             self.log(_("Wrote open_firewall.bat (run as administrator)"))
@@ -417,7 +421,8 @@ class Installer:
         title = str(self.plan.values.get("launch:title", "Minecraft Server")) or "Minecraft Server"
         self.forward = upnp.forward_ports(rules, title[:40], self.log)
         if self.forward.ok:
-            self.log(_("✓ Port forwarding done. External address: {0}").format(self.forward.external_ip))
+            self.log(_("✓ Port forwarding done ({0}). External address: {1}").format(
+                upnp.methods_text(self.forward.methods), self.forward.external_ip))
         else:
             for e in self.forward.errors:
                 self.log("  " + e)

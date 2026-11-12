@@ -749,7 +749,11 @@ class MainWindow(QWidget):
         self.next.setText(_("Install  ✓") if key == "summary" else _("Next  →"))
         hints = {"server": "", "version": "",
                  "summary": "" if self.st.eula or self.st.event else _("You must accept the EULA to install")}
-        if key == "resource" and not pg.can_next():
+        from ..core import ports
+        perr = [] if self.st.event or key not in ("resource", "summary") else ports.problems(self.st.values)[0]
+        if perr:
+            self.hint_lbl.setText(perr[0])
+        elif key == "resource" and not pg.can_next():
             self.hint_lbl.setText(_("Java {0} or newer is required").format(self.st.java_need))
         else:
             self.hint_lbl.setText(hints.get(key, ""))

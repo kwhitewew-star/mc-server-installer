@@ -23,8 +23,10 @@ router's port and starts the server once to check that it works.
 - **Mods & plugins** from Modrinth, filtered to your loader and version, with required dependencies added
   automatically. Local `.jar`/`.zip` files work too.
 - **Java**: finds installed Java (including the Minecraft Launcher's) and can download Temurin JDK for you.
-- **Port forwarding**: opens the needed ports automatically over UPnP. If the router doesn't allow it,
-  a guide shows the exact values for your network (router address, this PC's IP, every port and protocol),
+- **Port forwarding**: opens the needed ports automatically (UPnP on every adapter, then PCP / NAT-PMP, then
+  Windows' own UPnP service) and adds Windows Firewall rules. If the router doesn't allow it,
+  a 12-step picture guide walks through it with the exact values for your network (router address, this PC's
+  IP, every port and protocol): the router's forwarding rule, a Windows Firewall inbound rule made by hand,
   where the menu is on common routers, and how to recognize double NAT / CGNAT.
 - **Extras**: `start.bat`/`start.sh` with optional auto-restart, Aikar's flags, backup scripts,
   a firewall script, desktop shortcut, server icon, ops and whitelist.

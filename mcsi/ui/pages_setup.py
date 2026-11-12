@@ -7,7 +7,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (QButtonGroup, QFileDialog, QGridLayout, QHBoxLayout, QLineEdit, QListWidget,
                              QListWidgetItem, QScrollArea, QSlider, QVBoxLayout, QWidget)
 
-from ..core import schema
+from ..core import ports, schema
 from ..core.java import best_for, find_javas, install_jdk
 from ..core.providers import PROVIDERS
 from .state import State, default_folder, event_folder, recommended_ram, run_async, total_ram_gb
@@ -477,11 +477,13 @@ class ResourcePage(Page):
         pl.addWidget(label(_("Server port"), "h3"))
         pl.addStretch(1)
         self.port = NoWheelSpin()
-        self.port.setRange(1, 65535)
+        self.port.setRange(ports.MIN_PORT, 65535)
         self.port.setFixedWidth(120)
-        self.port.valueChanged.connect(lambda v: self.st.values.__setitem__("server-port", v))
+        self.port.valueChanged.connect(self._port)
         pl.addWidget(self.port)
         lay.addLayout(pl)
+        self.port_note = label("", "small", True)
+        lay.addWidget(self.port_note)
         lay = outer
         lay.addWidget(self.perf)
 
@@ -526,6 +528,7 @@ class ResourcePage(Page):
         self.ram.setValue(min(self.st.ram or recommended_ram(self.total), self.ram.maximum()))
         self._ram(self.ram.value())
         self.port.setValue(int(self.st.values.get("server-port", 25565)))
+        self._port(self.port.value())
         if e:
             need = 8
             self.java_need.setText(_("  {0} needs Java {1} or newer").format(e.name, need))
@@ -671,13 +674,26 @@ class ResourcePage(Page):
             warn = _("  <span style='color:{0}'>· Windows may run low on memory</span>").format(WARN)
         self.ram_note.setText(_("System RAM {0}GB · recommended {1}GB{2}").format(self.total, recommended_ram(self.total), warn))
 
+    def _port(self, v):
+        self.st.values["server-port"] = v
+        errs, warns = ports.problems(self.st.values)
+        msgs = [f"<span style='color:{DANGER}'>{m}</span>" for m in errs] + \
+               [f"<span style='color:{WARN}'>{m}</span>" for m in warns]
+        self.port_note.setText("<br>".join(msgs) or _("{0}–65535 · default 25565").format(ports.MIN_PORT))
+        self.changed.emit()
+
     def can_next(self):
         if self._installing or not self.st.folder:
+            return False
+        if not self.st.event and ports.problems(self.st.values)[0]:
             return False
         j = next((x for x in self.st.javas if x.path == self.st.java), None)
         return bool(j and j.major >= self.st.java_need)
 
     def validate(self):
+        errs = [] if self.st.event else ports.problems(self.st.values)[0]
+        if errs:
+            return errs[0]
         if not self.can_next():
             return _("Choose Java {0} or newer, or install it automatically.").format(self.st.java_need)
         return None

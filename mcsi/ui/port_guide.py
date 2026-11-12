@@ -10,10 +10,11 @@ from PyQt6.QtCore import Qt, QUrl
 from PyQt6.QtGui import QDesktopServices, QGuiApplication
 from PyQt6.QtWidgets import QGridLayout, QHBoxLayout, QScrollArea, QVBoxLayout, QWidget
 
-from ..core import upnp
+from ..core import upnp, winfw
 from ..core.net import get_json
 from ..i18n import _
 from .overlay import Overlay
+from .port_pictures import STEP_COUNT, STEP_TITLES, PortPicture
 from .state import local_ip, run_async
 from .widgets import ACCENT, DANGER, MUTED, OK, WARN, Button, Glass, label, wrap_label
 
@@ -89,7 +90,30 @@ class PortGuide(Overlay):
         # manual
         card, cv = _card()
         cv.addWidget(label(_("2. Manual setup (if automatic fails)"), "h3"))
+        # picture guide: one drawn picture per step, filled in with this PC's values
+        self.pic = PortPicture()
+        cv.addWidget(self.pic)
+        nav = QHBoxLayout()
+        self.prev_btn = Button("◀")
+        self.prev_btn.clicked.connect(lambda: self._go_step(self.pic.step - 1))
+        nav.addWidget(self.prev_btn)
+        self.step_lbl = label("", "h3")
+        self.step_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        nav.addWidget(self.step_lbl, 1)
+        self.next_btn = Button("▶", "primary")
+        self.next_btn.clicked.connect(lambda: self._go_step(self.pic.step + 1))
+        nav.addWidget(self.next_btn)
+        cv.addLayout(nav)
+        self.caption = wrap_label("", "")
+        self.caption.setTextFormat(Qt.TextFormat.RichText)
+        self.caption.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.caption.setMinimumHeight(44)
+        cv.addWidget(self.caption)
+        self.captions: list[str] = []
+        self.text_btn = Button(_("Show all steps as text"))
+        self.text_btn.clicked.connect(self._toggle_text)
         self.steps = wrap_label("", "")
+        self.steps.hide()
         self.steps.setTextFormat(Qt.TextFormat.RichText)
         self.steps.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         cv.addWidget(self.steps)
@@ -104,7 +128,9 @@ class PortGuide(Overlay):
         test.clicked.connect(self._test)
         row.addWidget(test)
         row.addStretch(1)
+        row.addWidget(self.text_btn)
         cv.addLayout(row)
+        cv.addWidget(self.steps)
         self.v.addWidget(card)
 
         # router menus
@@ -150,7 +176,8 @@ class PortGuide(Overlay):
         ip = (self.result.external_ip if self.result and self.result.external_ip else "") or self.public_ip
         if not ip:
             return ""
-        return ip if self.port() == 25565 else f"{ip}:{self.port()}"
+        port = self.result.ext_ports.get(f"{self.port()}/TCP", self.port()) if self.result else self.port()
+        return ip if port == 25565 else f"{ip}:{port}"
 
     def set_result(self, res: upnp.ForwardResult | None) -> None:
         self.result = res
@@ -193,9 +220,16 @@ class PortGuide(Overlay):
         if self.busy:
             txt = f"<span style='color:{MUTED}'>{_('Asking the router…')}</span>"
         elif r is None:
-            txt = _("Most home routers support UPnP. If it is enabled, this opens the ports for you.")
+            txt = _("Tries UPnP, then PCP / NAT-PMP, then Windows' own UPnP service. Most home routers support at "
+                "least one of them.")
+        elif r.ok and upnp.DIRECT in r.methods:
+            txt = (f"<span style='color:{OK}'>✓ " + _("This PC has a public IP ({0}): it is connected to the internet "
+                   "directly, so no port forwarding is needed.").format(r.external_ip) + "</span> "
+                   + _("Only the Windows firewall has to allow the ports (steps 6–11 below, or open_firewall.bat). "
+                       "Friends can join at <b>{0}</b>.").format(self.friend_address() or "?"))
         elif r.ok:
             txt = (f"<span style='color:{OK}'>✓ {_('Ports opened automatically.')}</span> "
+                   + (f"<span style='color:{MUTED}'>({upnp.methods_text(r.methods)})</span> " if r.methods else "")
                    + _("Friends can join at <b>{0}</b>.").format(self.friend_address() or "?"))
         else:
             first = r.errors[0] if r.errors else _("Unknown error")
@@ -230,6 +264,46 @@ class PortGuide(Overlay):
         ]
         self.steps.setText("<br>".join(f"<b>{i + 1}.</b> {s}" for i, s in enumerate(steps)))
         self.fw_btn.setVisible(os.name == "nt")
+        pub = (r.external_ip if r and r.external_ip else "") or self.public_ip
+        self.pic.set_values(gw, lip, pub, port, rules)
+        self.captions = [
+            _("Friends connect to your public IP. The router has to pass port {0}{1}</span> on to this PC "
+              "({0}{2}</span>). That pass-through rule is \"port forwarding\".").format(a, port, lip),
+            steps[0],
+            _("Find the port forwarding menu. The name differs by router; the list below shows where it is on "
+              "common brands."),
+            steps[1], steps[2],
+            _("Windows also has to let the connection in. Open <b>Control Panel → System and Security → Windows "
+              "Defender Firewall</b> and click <b>Advanced settings</b> on the left. (Or press Win+R and run "
+              "<b>wf.msc</b>.)"),
+            _("Click <b>Inbound Rules</b> on the left, then <b>New Rule...</b> on the right."),
+            _("Choose <b>Port</b> and click Next."),
+            _("Choose {0}{1}</span>, then <b>Specific local ports</b> and type {0}{2}</span>. Next.").format(
+                a, rules[0][1] if rules else "TCP", rules[0][0] if rules else port)
+            + (_(" Make one more rule the same way for each of: {0}.").format(
+                ", ".join(f"{po}/{pr}" for po, pr, _w in rules[1:])) if len(rules) > 1 else ""),
+            _("Choose <b>Allow the connection</b> and click Next."),
+            _("Leave Domain, Private and Public all checked, Next, give it a name such as {0}Minecraft {1} {2}</span> "
+              "and click <b>Finish</b>. (open_firewall.bat in the server folder does the same in one click.)").format(
+                a, rules[0][1] if rules else "TCP", rules[0][0] if rules else port),
+            steps[4],
+        ]
+        self._go_step(self.pic.step)
+
+    def _go_step(self, i):
+        i = max(0, min(STEP_COUNT - 1, i))
+        self.pic.set_step(i)
+        title = STEP_TITLES[i].format(self.port())
+        self.step_lbl.setText(_("Step {0} / {1} · {2}").format(i + 1, STEP_COUNT, title))
+        if self.captions:
+            self.caption.setText(self.captions[i])
+        self.prev_btn.setEnabled(i > 0)
+        self.next_btn.setEnabled(i < STEP_COUNT - 1)
+
+    def _toggle_text(self):
+        v = not self.steps.isVisible()
+        self.steps.setVisible(v)
+        self.text_btn.setText(_("Hide text steps") if v else _("Show all steps as text"))
 
     # ---- actions ----
     def try_auto(self):
@@ -239,7 +313,11 @@ class PortGuide(Overlay):
         self._fill()
         rules = [(p, pr) for p, pr, _why in self.rules()]
         title = str(self.st.values.get("launch:title", "Minecraft Server"))[:40] or "Minecraft Server"
-        run_async(lambda sig: upnp.forward_ports(rules, title), self._auto_done, self._auto_err)
+        def work(sig):
+            if winfw.available() and self.st.values.get("manage:firewall_auto", True):
+                winfw.ensure_rules(rules)
+            return upnp.forward_ports(rules, title)
+        run_async(work, self._auto_done, self._auto_err)
 
     def _auto_done(self, res):
         self.busy = False
