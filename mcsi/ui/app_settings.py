@@ -25,6 +25,10 @@ APP_DEFAULTS = {
     "hide_client_mods": True,
     "launcher_java": True,
     "language": "en",
+    "check_updates": True,
+    "events_all_year": False,
+    "skip_version": "",
+    "events_seen": [],
 }
 
 # (key, title, description, group)
@@ -41,6 +45,8 @@ ITEMS = [
     ("parallax", _("3D view follows the mouse"), "", _("Display")),
     ("particles", _("Particles"), "", _("Display")),
     ("server_anim", _("Server type animation"), _("A 3D animation for the chosen server (e.g. Paper's paper plane, CraftBukkit's lava bucket)"), _("Display")),
+    ("check_updates", _("Check for updates at startup"), _("Shows a notice when a new version is released on GitHub."), _("Updates · events")),
+    ("events_all_year", _("Show event loaders all year"), _("Limited-time joke loaders (Halloween, Christmas...) normally appear only during their event."), _("Updates · events")),
 ]
 
 

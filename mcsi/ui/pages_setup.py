@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (QButtonGroup, QFileDialog, QGridLayout, QHBoxLayout
 from ..core import schema
 from ..core.java import best_for, find_javas, install_jdk
 from ..core.providers import PROVIDERS
-from .state import State, default_folder, recommended_ram, run_async, total_ram_gb
+from .state import State, default_folder, event_folder, recommended_ram, run_async, total_ram_gb
 from .widgets import (ACCENT, FlowLayout, DANGER, MUTED, OK, WARN, Button, Card, Glass, NoWheelCombo, NoWheelSpin,
                          Progress, Spinner, Toggle, label)
 from ..core.versions import is_release, required_java
@@ -95,6 +95,7 @@ class WelcomePage(Page):
 # ------------------------------------------------------------------ 2. Server type
 class ServerPage(Page):
     picked = pyqtSignal(str)
+    event_picked = pyqtSignal(str)
     title = _("Server type")
     subtitle = _("Plugins: Paper or Purpur. Mods: Fabric or NeoForge. Both: a hybrid like Youer or Arclight.")
 
@@ -111,6 +112,13 @@ class ServerPage(Page):
         box = QVBoxLayout(inner)
         box.setContentsMargins(0, 0, 8, 0)
         box.setSpacing(8)
+        self.ev_box = QWidget()                     # limited-time event loaders (filled by set_events)
+        self.ev_lay = QVBoxLayout(self.ev_box)
+        self.ev_lay.setContentsMargins(0, 0, 0, 6)
+        self.ev_lay.setSpacing(8)
+        self.ev_box.hide()
+        self.ev_cards = {}
+        box.addWidget(self.ev_box)
         for title, kinds in ((_("Vanilla · plugin servers"), ("vanilla", "plugin")), (_("Modded servers"), ("mod",)),
                             (_("Hybrid servers · mods and plugins together"), ("hybrid",))):
             box.addWidget(label(title, "small"))
@@ -136,10 +144,46 @@ class ServerPage(Page):
         self.root.addWidget(scroll, 1)
 
     def enter(self):
-        if self.st.server in self.cards:
+        if self.st.event in self.ev_cards:
+            self.ev_cards[self.st.event].setChecked(True)
+        elif self.st.server in self.cards:
             self.cards[self.st.server].setChecked(True)
 
+    def set_events(self, events, new_keys) -> None:
+        """Show the event loaders available right now at the top (hidden when there are none)."""
+        from .notices import event_card
+        while self.ev_lay.count():
+            it = self.ev_lay.takeAt(0)
+            if it.widget():
+                it.widget().deleteLater()
+            elif it.layout():
+                lay = it.layout()
+                while lay.count():
+                    w = lay.takeAt(0).widget()
+                    if w:
+                        w.deleteLater()
+        self.ev_cards = {}
+        if not events:
+            self.ev_box.hide()
+            return
+        self.ev_lay.addWidget(label(_("🎉 Limited-time event loaders"), "small"))
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(10)
+        for i, e in enumerate(events):
+            c = event_card(e, e.key in new_keys)
+            self.group.addButton(c)
+            c.setChecked(self.st.event == e.key)
+            c.clicked.connect(lambda _=False, k=e.key: self.event_picked.emit(k))
+            grid.addWidget(c, i // 3, i % 3)
+            self.ev_cards[e.key] = c
+        for j in range(3):
+            grid.setColumnStretch(j, 1)
+        self.ev_lay.addLayout(grid)
+        self.ev_box.show()
+
     def _pick(self, k):
+        self.st.event = ""
         if k != self.st.server:
             self.st.server = k
             self.st.mc = ""
@@ -148,7 +192,7 @@ class ServerPage(Page):
         self.picked.emit(k)
 
     def can_next(self):
-        return self.st.server in PROVIDERS
+        return bool(self.st.event) or self.st.server in PROVIDERS
 
 
 # ------------------------------------------------------------------ 3. Version
@@ -408,6 +452,10 @@ class ResourcePage(Page):
         self.folder_note = label("", "small", True)
         lay.addWidget(self.folder_note)
 
+        self.perf = QWidget()                      # RAM + port (not needed for event loaders)
+        outer, lay = lay, QVBoxLayout(self.perf)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(16)
         lay.addWidget(label(_("Memory (RAM)"), "h3"))
         rl = QHBoxLayout()
         self.ram = QSlider(Qt.Orientation.Horizontal)
@@ -434,6 +482,8 @@ class ResourcePage(Page):
         self.port.valueChanged.connect(lambda v: self.st.values.__setitem__("server-port", v))
         pl.addWidget(self.port)
         lay.addLayout(pl)
+        lay = outer
+        lay.addWidget(self.perf)
 
         jl = QHBoxLayout()
         jl.addWidget(label("Java", "h3"))
@@ -466,17 +516,24 @@ class ResourcePage(Page):
         self._installing = False
 
     def enter(self):
+        from ..core import events as ev
+        e = ev.find(self.st.event) if self.st.event else None
         if not self.st.folder:
-            self.st.folder = default_folder(self.st.server, self.st.mc)
+            self.st.folder = event_folder(e) if e else default_folder(self.st.server, self.st.mc)
         self.folder.setText(self.st.folder)
         self._check_folder()
+        self.perf.setVisible(e is None)
         self.ram.setValue(min(self.st.ram or recommended_ram(self.total), self.ram.maximum()))
         self._ram(self.ram.value())
         self.port.setValue(int(self.st.values.get("server-port", 25565)))
-        need = PROVIDERS[self.st.server].java_for(self.st.mc) if self.st.server == "babric" else \
-            required_java(self.st.mc)
+        if e:
+            need = 8
+            self.java_need.setText(_("  {0} needs Java {1} or newer").format(e.name, need))
+        else:
+            need = PROVIDERS[self.st.server].java_for(self.st.mc) if self.st.server == "babric" else \
+                required_java(self.st.mc)
+            self.java_need.setText(_("  {0} servers need Java {1} or newer").format(self.st.mc, need))
         self.st.java_need = need
-        self.java_need.setText(_("  {0} servers need Java {1} or newer").format(self.st.mc, need))
         self.get_java.setText(_("Install Java {0} automatically").format(need))
         if not self._scanned:
             self.scan()
@@ -599,6 +656,8 @@ class ResourcePage(Page):
         p = Path(self.st.folder).expanduser() if self.st.folder else None
         if not p:
             self.folder_note.setText(_("Enter a folder."))
+        elif p.is_dir() and any(p.iterdir()) and self.st.event:
+            self.folder_note.setText(_("<span style='color:{0}'>Files already exist.</span> The loader files will be overwritten.").format(WARN))
         elif p.is_dir() and any(p.iterdir()):
             self.folder_note.setText(_("<span style='color:{0}'>Files already exist.</span> server.properties will be merged and server files overwritten.").format(WARN))
         else:

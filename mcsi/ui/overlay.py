@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QAbstractAnimation, QEasingCurve, QRectF, Qt, QVariantAnimation
+from PyQt6.QtCore import QAbstractAnimation, QEasingCurve, QRectF, Qt, QVariantAnimation, pyqtSignal
 from PyQt6.QtGui import QBrush, QColor, QLinearGradient, QPainter, QPen
 from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 
@@ -14,10 +14,11 @@ class Backdrop(QWidget):
     def __init__(self, parent):
         super().__init__(parent)
         self.alpha = 0.0
+        self.strength = 185
 
     def paintEvent(self, e):
         p = QPainter(self)
-        p.fillRect(self.rect(), QColor(4, 6, 16, int(185 * self.alpha)))
+        p.fillRect(self.rect(), QColor(4, 6, 16, int(self.strength * self.alpha)))
 
 
 class DarkPanel(Glass):
@@ -43,6 +44,7 @@ class Overlay(QWidget):
     """
 
     max_size = (720, 620)
+    closed = pyqtSignal()
 
     def __init__(self, win, title: str):
         super().__init__(win)
@@ -93,6 +95,11 @@ class Overlay(QWidget):
     def _done(self):
         if self._closing:
             self.hide()
+            self.closed.emit()
+
+    def panel_rect(self, w: int, h: int, v: float):
+        """Panel geometry for animation value v (0..1). Centered by default."""
+        return (self.width() - w) // 2, (self.height() - h) // 2 + int((1 - v) * 18)
 
     def _step(self, v):
         v = float(v or 0.0)
@@ -101,7 +108,8 @@ class Overlay(QWidget):
         w, h = min(self.max_size[0], self.width() - 80), min(self.max_size[1], self.height() - 80)
         s = 0.94 + 0.06 * v
         pw, ph = int(w * s), int(h * s)
-        self.panel.setGeometry((self.width() - pw) // 2, (self.height() - ph) // 2 + int((1 - v) * 18), pw, ph)
+        x, y = self.panel_rect(pw, ph, v)
+        self.panel.setGeometry(x, y, pw, ph)
         self.panel.setWindowOpacity(v)
         self.back.update()
 

@@ -329,7 +329,7 @@ class SummaryPage(Page):
         self.root.addWidget(self.grid_box)
         self.warns = label("", "", True)
         self.root.addWidget(self.warns)
-        eg = Glass()
+        eg = self.eula_box = Glass()
         el = QHBoxLayout(eg)
         el.setContentsMargins(20, 14, 20, 14)
         txt = label(_("<b>I accept the Minecraft EULA</b><br><span style='color:#9aa4bf'>Required to run the server. <a style='color:#5eead4' href='https://aka.ms/MinecraftEULA'>Read the EULA</a></span>"), "", True)
@@ -352,12 +352,26 @@ class SummaryPage(Page):
                 w.deleteLater()
         st, p = self.st, PROVIDERS[self.st.server]
         java = next((j for j in st.javas if j.path == st.java), None)
+        from ..core import events as ev
+        e = ev.find(st.event) if st.event else None
+        self.eula_box.setVisible(e is None)
+        if e:
+            self._fill([(_("Loader"), f"{e.icon}  {e.name}"), (_("Event"), e.window_text()),
+                        ("Java", java.label if java else "?"), (_("Install folder"), st.folder)])
+            self.warns.setText(f"<div style='color:{MUTED}; margin:3px 0'>" + _(
+                "This is a joke loader, not a real server: it installs instantly, and start.bat plays a short "
+                "animation and exits.") + "</div>")
+            return
         items = [(_("Server"), p.name), (_("Version"), st.mc), (_("Build"), st.build or _("Automatic (recommended)")),
                  (_("Memory"), f"{st.ram} GB"), (_("Port"), str(st.values.get("server-port", 25565))),
                  ("Java", java.label if java else "?"), (_("Install folder"), st.folder),
                  (_("Changed settings"), _("{0} / {1}").format(st.changed_count(), schema.count())),
                  (_("Mods · plugins"), _("{0}").format(len(st.addons)) if st.addons else _("None")),
                  (_("First run"), _("On (world generation + check)") if st.values.get("manage:first_run", True) else _("Off"))]
+        self._fill(items)
+        self._warnings(st, p)
+
+    def _fill(self, items):
         for i, (k, v) in enumerate(items):
             r, c = divmod(i, 3)
             box = QVBoxLayout()
@@ -370,6 +384,8 @@ class SummaryPage(Page):
             vl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
             box.addWidget(vl)
             self.grid.addWidget(w, r, c)
+
+    def _warnings(self, st, p):
         self.eula.blockSignals(True)
         self.eula.setChecked(st.eula)
         self.eula.blockSignals(False)
@@ -395,7 +411,7 @@ class SummaryPage(Page):
         self.warns.setText("".join(f"<div style='color:{WARN}; margin:3px 0'>⚠ {x}</div>" for x in w))
 
     def can_next(self):
-        return self.st.eula
+        return self.st.eula or bool(self.st.event)
 
 
 # ------------------------------------------------------------------ Install
@@ -430,6 +446,37 @@ class Worker(QThread):
         self.cancelled = True
         if self.inst:
             self.inst.kill()
+
+
+class EventWorker(QThread):
+    """Installs a limited-time event loader (just a jar and start scripts)."""
+    log = pyqtSignal(str)
+    progress = pyqtSignal(int)
+    stage = pyqtSignal(int, str)
+    done = pyqtSignal(bool, str, list)
+
+    def __init__(self, event, folder: str, java: str):
+        super().__init__()
+        self.event, self.folder, self.java = event, folder, java
+        self.inst = None
+
+    def run(self):
+        from ..core import events as ev
+        e = self.event
+        try:
+            self.stage.emit(1, _("Getting {0}").format(e.name))
+            self.progress.emit(20)
+            folder = ev.install(e, Path(self.folder).expanduser(), self.java or "java", self.log.emit)
+            self.progress.emit(80)
+            self.stage.emit(7, _("Finishing"))
+            self.log.emit(_("Wrote start.bat, start.sh and README.txt in {0}").format(folder))
+            self.progress.emit(100)
+            self.done.emit(True, "", [_("Run start.bat (Windows) or start.sh (Mac/Linux) in the folder.")])
+        except Exception as ex:  # noqa: BLE001
+            self.done.emit(False, str(ex) or type(ex).__name__, [])
+
+    def cancel(self):
+        pass
 
 
 class StageRow(QWidget):
@@ -520,6 +567,8 @@ class InstallPage(Page):
 
     def start(self):
         st = self.st
+        if st.event:
+            return self._start_event()
         java = next((j for j in st.javas if j.path == st.java), None)
         plan = Plan(server=st.server, mc=st.mc, build=st.build, folder=st.folder, ram_gb=st.ram, java=st.java,
                     java_major=java.major if java else 0, values=dict(st.values), eula=st.eula,
@@ -539,6 +588,24 @@ class InstallPage(Page):
         self.running = True
         self.cancel_btn.setEnabled(True)
         self.worker = Worker(plan)
+        self.worker.log.connect(self.log.appendPlainText)
+        self.worker.progress.connect(self._prog)
+        self.worker.stage.connect(self._stage)
+        self.worker.done.connect(self._done)
+        self.worker.start()
+
+    def _start_event(self):
+        from ..core import events as ev
+        e = ev.find(self.st.event)
+        self.log.clear()
+        for i, r in enumerate(self.rows):
+            r.set("wait" if i in (1, 7) else "skip")
+        self.forward = None
+        self.bar.set_value(0)
+        self._cur = -1
+        self.running = True
+        self.cancel_btn.setEnabled(False)
+        self.worker = EventWorker(e, self.st.folder, self.st.java)
         self.worker.log.connect(self.log.appendPlainText)
         self.worker.progress.connect(self._prog)
         self.worker.stage.connect(self._stage)
@@ -653,6 +720,20 @@ class DonePage(Page):
         self.copy_btn.setVisible(ok)
         self.port_btn.setVisible(ok)
         self.retry.setVisible(not ok)
+        from ..core import events as ev
+        e = ev.find(st.event) if st.event else None
+        if ok and e:
+            self.copy_btn.setVisible(False)
+            self.port_btn.setVisible(False)
+            self.run_btn.setText(_("▶  Run it"))
+            self.h.setText(_("Installed!"))
+            self.sub.setText(_("{0} {1} is ready. Run start.bat in the folder.").format(e.icon, e.name))
+            self.addr.setText(_("<b>Folder</b>  <span style='color:{0}'>{1}</span>").format(
+                ACCENT, Path(st.folder).expanduser()))
+            self.extra.setText(_("This is a joke loader, not a real server: it installs instantly, and "
+                                 "start.bat plays a short animation and exits."))
+            return
+        self.run_btn.setText(_("▶  Start server"))
         if ok:
             self.h.setText(_("Installed!"))
             self.sub.setText(_("Your {0} {1} server is ready.").format(PROVIDERS[st.server].name, st.mc))

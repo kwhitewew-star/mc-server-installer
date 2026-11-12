@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.0.3
+
+- New: **update notice**. At startup the installer checks GitHub and offers the new version
+  (Download / Later / Skip this version). Can be turned off in ⚙ Settings.
+- New: **limited-time event loaders**. Joke server types that appear only around their event:
+  Pumpkin Loader (Halloween), Jingle Loader (Christmas), Firework Loader (New Year),
+  Cocoa Loader (Valentine's Day), Prank Loader (April Fools' Day) and UFO Loader (World UFO Day).
+  Each has its own 3D animation (UFO Loader has the UFO borrow the menu for a moment). Pick one and press
+  Next: only the folder, review, install and done steps remain, and the folder opens when it is done.
+  Its `start.bat`/`start.sh` opens a window with a short 3D animation (drawn in plain Java) and exits;
+  without a screen it plays a console animation instead. Every loader has its own
+  GitHub release (`event-halloween`, ...). A notice announces a new event loader once. New events can be added later without
+  an app update. *⚙ Settings → Show event loaders all year* shows them any time.
+- README: step-by-step help for the "Windows protected your PC" warning.
+- CI: GitHub Actions updated to the Node.js 24 versions.
+
 ## 1.0.2
 
 - Fixed: the 3D (OpenGL) background did not start in the 1.0.1 `.exe` ("3D effects: not supported").

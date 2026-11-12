@@ -33,6 +33,11 @@ router's port and starts the server once to check that it works.
 - **Languages**: English, 한국어, 日本語, 简体中文, Español.
 - Glass UI with a real-time OpenGL background (refraction, particles, a short animation for each server
   type). It falls back to a plain 2D background when OpenGL isn't available.
+- **Update notice**: tells you when a new version is out (can be turned off in ⚙ Settings).
+- **Limited-time event loaders**: joke "server types" that appear only around Halloween, Christmas,
+  New Year, Valentine's Day, April Fools' Day and World UFO Day, each with its own 3D animation.
+  They install in a few clicks; their `start.bat` opens a short 3D animation window. Turn on
+  *⚙ Settings → Show event loaders all year* to see them any time.
 
 | Mods & plugins | Port forwarding guide |
 | --- | --- |
@@ -48,8 +53,18 @@ Get the latest version from **[Releases](https://github.com/kwhitewew-star/mc-se
 | `MC-Server-Installer-x.y.z-portable.zip` | Windows folder version. Unzip and run `MC-Server-Installer.exe`; starts faster. |
 | `mc-server-installer-x.y.z-source.zip` | Source code (see below). |
 
-Java is not required in advance: the installer can download it. The `.exe` is not code-signed, so Windows
-may say "Windows protected your PC"; click **More info → Run anyway**.
+Java is not required in advance: the installer can download it.
+
+### "Windows protected your PC"
+
+The `.exe` is not code-signed yet, so Microsoft Defender SmartScreen warns about it the first time:
+
+1. In the blue "Windows protected your PC" window, click **More info**.
+2. Click the **Run anyway** button that appears.
+
+Some antivirus programs also flag single-file Python apps by mistake. If that happens, use the
+portable zip or run from source, and feel free to report it in
+[Issues](https://github.com/kwhitewew-star/mc-server-installer/issues).
 
 ## Running from source
 
@@ -92,12 +107,15 @@ mcsi/
     modrinth.py    Modrinth search and dependency resolution
     upnp.py        UPnP IGD port forwarding (standard library only)
     java.py        Java detection and Temurin download
+    events.py      limited-time event loaders (built-in list + events.json from the "events" release)
+    update.py      new-version check
     net.py, versions.py
   ui/          PyQt6 windows, pages and widgets
   gfx/         OpenGL background, GLSL shaders and server animations
   i18n/        translation catalogs (<code>.json)
-  assets/      app icon
-scripts/       selftest.py, screenshots.py, i18n_sync.py, build_exe.py
+  assets/      app icon, bundled event loader jars
+events/src/    the event loader (one small Java program, built per event)
+scripts/       selftest.py, screenshots.py, i18n_sync.py, build_exe.py, build_events.py
 tests/         offline tests with fake APIs and a fake Java
 ```
 
@@ -125,6 +143,22 @@ git push origin v1.0.1
 ```
 
 The *Release* workflow builds the Windows files on GitHub and attaches them to the release.
+
+### Event loaders
+
+The event list is built into `mcsi/core/events.py`. `python scripts/build_events.py` (needs a JDK)
+compiles `events/src/EventLoader.java` into one jar per event, copies them into `mcsi/assets/events/` and
+writes `dist/events/`: the list (`events.json`) and, for every loader, its own release folder
+(`event-halloween`, `event-christmas`, ...) with the jar and release notes. Publish them all with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File dist\events\publish.ps1
+```
+
+Every one of these releases is a **pre-release**, so none of them ever becomes "latest". The app reads
+`events.json` from the `events` release at startup and downloads each jar from its own release, so dates
+can be changed and new events added without a new app version. To preview a date, set
+`MCSI_EVENT_DATE=2026-10-31` before starting the app.
 
 ### Translations
 

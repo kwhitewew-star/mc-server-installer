@@ -7,9 +7,10 @@ import os
 import sys
 from pathlib import Path
 
-from PyQt6.QtCore import QEasingCurve, QPointF, QRectF, Qt, QVariantAnimation, pyqtSignal
+from PyQt6.QtCore import QEasingCurve, QPointF, QRectF, Qt, QTimer, QVariantAnimation, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QIcon, QLinearGradient, QPainter, QPen, QPixmap
-from PyQt6.QtWidgets import (QAbstractButton, QApplication, QHBoxLayout, QMessageBox, QStackedWidget, QVBoxLayout, QWidget)
+from PyQt6.QtWidgets import (QAbstractButton, QApplication, QHBoxLayout, QLabel, QMessageBox, QStackedWidget,
+                             QVBoxLayout, QWidget)
 
 from .app_settings import APP_DEFAULTS, SettingsOverlay
 from .port_guide import PortGuide
@@ -18,7 +19,7 @@ RESTART = {"on": False}
 from .pages_setup import Page, ResourcePage, ServerPage, VersionPage, WelcomePage
 from .pages_addons import AddonsPage
 from .pages_config import DonePage, InstallPage, ManagePage, PropsPage, RulesPage, SummaryPage
-from .state import MODE_STEPS, STEP_NAMES, State
+from .state import MODE_STEPS, STEP_NAMES, State, run_async
 from .widgets import ACCENT, ACCENT2, MUTED, TEXT, Background, Button, Glass, Hover, pick_font, qss
 
 
@@ -373,6 +374,143 @@ class MainWindow(QWidget):
         self.pages["server"].changed.connect(self._sync_gl)
         self.pages["server"].picked.connect(lambda k: self.gl and self.gl.play_anim(k))
         self._sync_gl()
+        self._setup_events()
+
+    # ---- Update / event notices and event loaders ----
+    def _setup_events(self):
+        from ..core import events as ev
+        from .notices import EventNotice, UpdateNotice
+        self.events = ev.cached()
+        ev.CURRENT[:] = self.events
+        self.update_notice = UpdateNotice(self, self.st)
+        self.event_notice = EventNotice(self)
+        self._notices: list = []
+        for ov in (self.update_notice, self.event_notice):
+            ov.closed.connect(self._notice_closed)
+        self.event_notice.try_it.connect(self._try_event)
+        self.pages["server"].event_picked.connect(self._event_picked)
+        self.pages["server"].picked.connect(lambda k: self._steps_changed())
+        self._refresh_events()
+        if not os.environ.get("MCSI_SCREENSHOT"):
+            QTimer.singleShot(1200, self._startup_checks)
+
+    def _seen(self) -> list:
+        return list(self.app("events_seen") or [])
+
+    def _refresh_events(self):
+        from ..core import events as ev
+        ev.CURRENT[:] = self.events
+        shown = ev.visible(self.events, bool(self.app("events_all_year")))
+        if self.st.event and self.st.event not in {e.key for e in shown}:
+            self.st.event = ""                 # the picked event is no longer available
+            self._steps_changed()
+        seen = set(self._seen())
+        self.pages["server"].set_events(shown, {e.key for e in shown if e.key not in seen and e.active()})
+
+    def _startup_checks(self):
+        from ..core import events as ev
+        from ..core import update
+        check = bool(self.app("check_updates"))
+        skip = str(self.app("skip_version") or "")
+
+        def work(_sig):
+            rel = None
+            if check:
+                try:
+                    rel = update.latest()
+                except Exception:      # offline, rate limited... never bother the user about it
+                    rel = None
+            return rel, ev.fetch()
+
+        def ok(res):
+            rel, events = res
+            self.events = events
+            self._refresh_events()
+            if rel and rel.version != skip:
+                self._notices.append(("update", rel))
+            seen = set(self._seen())
+            for e in events:
+                if e.active() and e.key not in seen:
+                    self._notices.append(("event", e))
+            self._show_next_notice()
+
+        run_async(work, ok, lambda m: None)
+
+    def _overlay_open(self) -> bool:
+        return any(o.isVisible() for o in (self.settings, self.ports, self.update_notice, self.event_notice)) \
+            or self.pages["install"].running
+
+    def _show_next_notice(self):
+        if not self._notices:
+            return
+        if self._overlay_open() or self._busy:
+            QTimer.singleShot(2000, self._show_next_notice)
+            return
+        kind, item = self._notices.pop(0)
+        if kind == "update":
+            self.update_notice.show_release(item)
+        else:
+            seen = self._seen()
+            if item.key not in seen:
+                self.st.app["events_seen"] = seen + [item.key]
+                self.st.save()
+            self._play_event_fx(item, ufo=False)
+            self.event_notice.show_event(item)
+
+    def _notice_closed(self):
+        self._sync_gl()
+        QTimer.singleShot(350, self._show_next_notice)
+
+    def _find_event(self, key):
+        return next((e for e in self.events if e.key == key), None)
+
+    def _try_event(self, key):
+        if "server" in self.steps and self.steps[self.idx] != "server":
+            self.go(self.steps.index("server"))
+        QTimer.singleShot(500, lambda: self._event_picked(key))
+
+    def _play_event_fx(self, e, ufo=True) -> int:
+        """Play the event's animation. Returns how long to wait before opening a dialog (ms)."""
+        if e.fx == "ufo":
+            if not ufo:
+                return 0
+            from .notices import UfoHeist
+            from .widgets import Card
+            pg = self.page()
+
+            def shown(w):
+                return w.isVisible() and not w.visibleRegion().isEmpty() and w.width() > 2
+
+            cards = [c for c in pg.findChildren(Card) if shown(c)]
+            # every piece of text too (titles, section headers, hints, window title), except text inside a card
+            texts = [w for w in pg.findChildren(QLabel) + self.bar.findChildren(QLabel) + [self.hint_lbl]
+                     if shown(w) and w.text().strip() and not any(c.isAncestorOf(w) for c in cards)]
+            targets = [self.rail, self.back, self.next] + texts + cards
+            heist = UfoHeist(self, targets[:48])
+            heist.start()
+            return UfoHeist.DURATION + 150
+        if self.gl and e.fx.startswith("gl:"):
+            self.gl.set_accent(e.accent)
+            self.gl.play_anim(e.fx[3:])
+        return 0
+
+    def _event_picked(self, key):
+        """An event loader card was picked: it becomes the selection, and the steps shrink to
+        folder -> review -> install -> done."""
+        e = self._find_event(key)
+        if not e or self._busy or self._overlay_open():
+            return
+        if e.key not in self._seen():
+            self.st.app["events_seen"] = self._seen() + [e.key]
+            self.st.save()
+        if self.st.event != key and not self.st.folder_custom:
+            self.st.folder = ""                     # use the event's own default folder
+        self.st.event = key
+        if "server" in self.pages and key in self.pages["server"].ev_cards:
+            self.pages["server"].ev_cards[key].setChecked(True)
+        self._steps_changed()
+        self._sync_gl()
+        self._play_event_fx(e)
 
     # ---- 3D background ----
     def _start_gl(self):
@@ -454,6 +592,8 @@ class MainWindow(QWidget):
 
     def _app_changed(self, key):
         self._apply_app_settings()
+        if key == "events_all_year" and hasattr(self, "events"):
+            self._refresh_events()
         if key == "first_run_default":
             self.st.values["manage:first_run"] = bool(self.app("first_run_default"))
         if key == "base_folder" and not self.st.folder_custom and self.st.mc:
@@ -537,14 +677,18 @@ class MainWindow(QWidget):
         key = self.steps[self.idx]
         self.gl.set_step(key)
         if key not in ("install", "done"):
-            self.gl.set_accent(PROVIDERS[self.st.server].accent if key != "welcome" else ACCENT)
+            from ..core import events as ev
+            e = ev.find(self.st.event) if self.st.event else None
+            acc = e.accent if e else PROVIDERS[self.st.server].accent
+            self.gl.set_accent(acc if key != "welcome" else ACCENT)
 
     # ---- Resizing (drag the edges) ----
     def resizeEvent(self, e):
         self.bg.setGeometry(self.rect())
         if self.gl:
             self.gl.setGeometry(self.rect())
-        for ov in (getattr(self, "settings", None), getattr(self, "ports", None)):
+        for ov in (getattr(self, "settings", None), getattr(self, "ports", None), getattr(self, "update_notice", None),
+                   getattr(self, "event_notice", None)):
             if ov is not None and ov.isVisible():
                 ov.setGeometry(self.rect())
         super().resizeEvent(e)
@@ -578,7 +722,14 @@ class MainWindow(QWidget):
     # ---- Steps ----
     @property
     def steps(self) -> list[str]:
+        if self.st.event:      # event loaders skip straight to folder -> review -> install -> done
+            return ["welcome", "server", "resource", "summary", "install", "done"]
         return MODE_STEPS[self.st.mode]
+
+    def _steps_changed(self):
+        self.reached = min(self.reached, self.idx)
+        self.rail.set_steps(self.steps, self.idx, self.reached)
+        self.refresh_nav()
 
     def _mode(self, m):
         self.reached = min(self.reached, 0)
@@ -596,7 +747,8 @@ class MainWindow(QWidget):
         self.next.setVisible(key not in ("install", "done"))
         self.next.setEnabled(pg.can_next() and not self._busy)
         self.next.setText(_("Install  ✓") if key == "summary" else _("Next  →"))
-        hints = {"server": "", "version": "", "summary": "" if self.st.eula else _("You must accept the EULA to install")}
+        hints = {"server": "", "version": "",
+                 "summary": "" if self.st.eula or self.st.event else _("You must accept the EULA to install")}
         if key == "resource" and not pg.can_next():
             self.hint_lbl.setText(_("Java {0} or newer is required").format(self.st.java_need))
         else:
@@ -681,11 +833,22 @@ class MainWindow(QWidget):
         if ok_:
             from pathlib import Path
             from .state import open_path
+            if self.st.event:            # event loader: just show the folder
+                open_path(str(Path(self.st.folder).expanduser()))
+                self._go_when_idle(self.steps.index("done"))
+                return
             if self.app("open_folder_after"):
                 open_path(str(Path(self.st.folder).expanduser()))
             if self.app("run_after"):
                 self.pages["done"]._run()
-        self.go(self.steps.index("done"))
+        self._go_when_idle(self.steps.index("done"))
+
+    def _go_when_idle(self, idx):
+        """go(), but waits for a page transition that is still running (a fast install can finish first)."""
+        if self._busy:
+            QTimer.singleShot(80, lambda: self._go_when_idle(idx))
+        else:
+            self.go(idx)
 
     def restart_app(self):
         """Close and start a fresh instance (used after switching the language)."""

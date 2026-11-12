@@ -15,7 +15,7 @@ from PyQt6.QtCore import QPoint, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QCursor, QSurfaceFormat
 from PyQt6.QtOpenGLWidgets import QOpenGLWidget
 
-from .anims import ANIM_BURST, ANIM_CENTER, ANIM_DUR, ANIM_ID, DEFAULT_DUR
+from .anims import ANIM_BURST, ANIM_CENTER, ANIM_DUR, ANIM_FLASH, ANIM_ID, DEFAULT_DUR
 from .shaders import COMPOSITE_FS, FULLSCREEN_VS, PARTICLE_FS, PARTICLE_VS, SCENE_FS
 from ..core.java import APP_DIR
 
@@ -314,10 +314,13 @@ class GLBackground(QOpenGLWidget):
         if self.anim:
             prev = self.anim_t
             self.anim_t += dt / self.anim_dur
-            b = ANIM_BURST.get(self.anim_key)
-            if b and prev < b[0] <= self.anim_t:
-                self.burst = 0.0
-                self.burst_world = tuple(ANIM_CENTER[i] + b[1][i] for i in range(3))
+            for bt, off in ANIM_BURST.get(self.anim_key, ()):
+                if prev < bt <= self.anim_t:
+                    self.burst = 0.0
+                    self.burst_world = tuple(ANIM_CENTER[i] + off[i] for i in range(3))
+            fl = ANIM_FLASH.get(self.anim_key)
+            if fl and prev < fl[0] <= self.anim_t:
+                self.flash, self.flash_col = 1.0, fl[1]
             if self.anim_t >= 0.86:
                 self.glass_vis.t = 1.0
                 self.reveal.t = 0.0

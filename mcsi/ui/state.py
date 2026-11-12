@@ -35,6 +35,7 @@ STEP_NAMES = {"welcome": _("Start"), "server": _("Server type"), "version": _("V
 class State:
     mode: str = "standard"
     server: str = "paper"
+    event: str = ""                                   # limited-time event loader picked instead (not saved)
     mc: str = ""
     build: str = ""
     snapshots: bool = False
@@ -55,6 +56,7 @@ class State:
         d = asdict(self)
         d.pop("javas", None)
         d.pop("java_need", None)
+        d.pop("event", None)
         d["values"] = {k: v for k, v in self.values.items() if k in schema.BY_KEY}
         if not self.app.get("remember", True):
             d = {"app": self.app, "fx": self.fx, "mode": self.mode}
@@ -95,6 +97,12 @@ class State:
 
 
 BASE_FOLDER = {"path": ""}
+
+
+def event_folder(e) -> str:
+    """Default folder for an event loader: next to the normal server folders."""
+    from ..core.events import default_folder_name
+    return str(Path(default_folder("x", "")).parent / default_folder_name(e))
 
 
 def default_folder(server: str, mc: str) -> str:
