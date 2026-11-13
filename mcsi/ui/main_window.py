@@ -389,6 +389,12 @@ class MainWindow(QWidget):
             ov.closed.connect(self._notice_closed)
         self.event_notice.try_it.connect(self._try_event)
         self.pages["server"].event_picked.connect(self._event_picked)
+        from .modpack_picker import ModpackPicker
+        self.modpacks = ModpackPicker(self, self.st)
+        from ..core import cfkey
+        cfkey.set_user(str(self.st.app.get("curseforge_key", "")))
+        self.modpacks.chosen.connect(self._modpack_chosen)
+        self.pages["server"].modpack_clicked.connect(self._open_modpacks)
         self.pages["server"].picked.connect(lambda k: self._steps_changed())
         self._refresh_events()
         if not os.environ.get("MCSI_SCREENSHOT"):
@@ -437,7 +443,8 @@ class MainWindow(QWidget):
         run_async(work, ok, lambda m: None)
 
     def _overlay_open(self) -> bool:
-        return any(o.isVisible() for o in (self.settings, self.ports, self.update_notice, self.event_notice)) \
+        return any(o.isVisible() for o in (self.settings, self.ports, self.update_notice, self.event_notice,
+                                            getattr(self, "modpacks", self.ports))) \
             or self.pages["install"].running
 
     def _show_next_notice(self):
@@ -494,6 +501,34 @@ class MainWindow(QWidget):
             self.gl.play_anim(e.fx[3:])
         return 0
 
+    def _open_modpacks(self, source):
+        if self._busy or self._overlay_open():
+            return
+        self._mp_source = source
+        # keep the card checked only when a pack is really chosen
+        if self.st.modpack and self.st.modpack_source == source:
+            self.pages["server"].mp_cards[source].setChecked(True)
+        elif self.st.server in self.pages["server"].cards and not self.st.event:
+            self.pages["server"].cards[self.st.server].setChecked(True)
+        if source in ("modrinth", "curseforge"):
+            self.modpacks.open_search(source)
+        else:
+            self.modpacks.open_file()
+
+    def _modpack_chosen(self, pack: dict):
+        if not self.st.folder_custom:
+            self.st.folder = ""                      # use the modpack's own default folder
+        self.st.modpack = pack
+        self.st.modpack_source = getattr(self.modpacks, "loaded_from", "") or getattr(self, "_mp_source", "file")
+        self.st.event = ""
+        self.st.server, self.st.mc, self.st.build = pack["server"], pack["mc"], pack.get("build", "")
+        self.st.addons = []
+        self.pages["server"].show_modpack(pack, self.st.modpack_source)
+        self._steps_changed()
+        self._sync_gl()
+        if self.gl:
+            self.gl.play_anim(pack["server"])
+
     def _event_picked(self, key):
         """An event loader card was picked: it becomes the selection, and the steps shrink to
         folder -> review -> install -> done."""
@@ -506,6 +541,9 @@ class MainWindow(QWidget):
         if self.st.event != key and not self.st.folder_custom:
             self.st.folder = ""                     # use the event's own default folder
         self.st.event = key
+        if self.st.modpack:
+            self.st.modpack = None
+            self.pages["server"].show_modpack(None)
         if "server" in self.pages and key in self.pages["server"].ev_cards:
             self.pages["server"].ev_cards[key].setChecked(True)
         self._steps_changed()
@@ -688,7 +726,7 @@ class MainWindow(QWidget):
         if self.gl:
             self.gl.setGeometry(self.rect())
         for ov in (getattr(self, "settings", None), getattr(self, "ports", None), getattr(self, "update_notice", None),
-                   getattr(self, "event_notice", None)):
+                   getattr(self, "event_notice", None), getattr(self, "modpacks", None)):
             if ov is not None and ov.isVisible():
                 ov.setGeometry(self.rect())
         super().resizeEvent(e)
@@ -724,6 +762,8 @@ class MainWindow(QWidget):
     def steps(self) -> list[str]:
         if self.st.event:      # event loaders skip straight to folder -> review -> install -> done
             return ["welcome", "server", "resource", "summary", "install", "done"]
+        if self.st.modpack:    # the modpack decides the version and the mods
+            return [s for s in MODE_STEPS[self.st.mode] if s not in ("version", "addons")]
         return MODE_STEPS[self.st.mode]
 
     def _steps_changed(self):

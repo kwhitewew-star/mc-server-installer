@@ -22,6 +22,10 @@ router's port and starts the server once to check that it works.
   to game rules in 1.21.9 and the snake_case game rule names of 1.21.11+.
 - **Mods & plugins** from Modrinth, filtered to your loader and version, with required dependencies added
   automatically. Local `.jar`/`.zip` files work too.
+- **Modpacks** from **Modrinth** and **CurseForge**: search them in the app (icons, tags, downloads, last
+  update, sorting) or open a `.mrpack` / CurseForge `.zip` / server pack. Version, loader and mods come from
+  the pack; client-only mods are skipped. On CurseForge the author's **server pack** is used when there is one.
+  Mods whose authors block other apps go to `MANUAL_DOWNLOADS.txt` with links.
 - **Java**: finds installed Java (including the Minecraft Launcher's) and can download Temurin JDK for you.
 - **Port forwarding**: opens the needed ports automatically (UPnP on every adapter, then PCP / NAT-PMP, then
   Windows' own UPnP service) and adds Windows Firewall rules. If the router doesn't allow it,
@@ -145,6 +149,24 @@ git push origin v1.0.1
 ```
 
 The *Release* workflow builds the Windows files on GitHub and attaches them to the release.
+
+### CurseForge API key
+
+CurseForge only lets apps use its API (search, mod downloads) with an API key, so, like Prism Launcher and
+GDLauncher, the official builds carry the app's own key:
+
+1. Apply for a third-party key at [console.curseforge.com](https://console.curseforge.com/) for
+   *MC Server Installer* (describe the app and link this repository) and wait for approval.
+2. Add it to the repository as an Actions secret named **`CF_API_KEY`**
+   (*Settings → Secrets and variables → Actions → New repository secret*).
+3. The *Release* workflow passes it to `scripts/build_exe.py`, which writes `mcsi/core/_cf_embedded.py`
+   (git-ignored) for PyInstaller and deletes it after the build. The key never goes into the repository.
+
+Key order at runtime (`mcsi/core/cfkey.py`): the user's own key from the modpack window, then the
+`MCSI_CF_KEY` environment variable, then the built-in key. Running from source without any key, CurseForge
+search asks for a key, and CurseForge server packs still install from a file. The key is also sent to
+CurseForge's CDN (`x-api-key` on `*.forgecdn.net`) as CurseForge asks downloaders to. Never use another
+app's key: it breaks CurseForge's terms and gets the key revoked.
 
 ### Event loaders
 

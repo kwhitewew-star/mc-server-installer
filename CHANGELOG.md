@@ -1,5 +1,58 @@
 # Changelog
 
+## 1.0.5
+
+- New: **modpacks**. A "📦 Modpacks" section on the server type step:
+  - **Modrinth modpack**: search Modrinth, pick a version, and the `.mrpack` is downloaded and installed.
+    Results look like on modrinth.com: the pack's icon, author, tags (loader, categories, newest Minecraft
+    version), downloads, followers and when it was last updated; sort by relevance / downloads / follows /
+    recently updated / newest, and more results load as you scroll. The chosen pack's icon shows on its card.
+    Only the mods the server needs are fetched (client-only mods are skipped), every file is checked
+    against its SHA-1/SHA-512, and `overrides/` + `server-overrides/` are applied.
+  - **Modpack file**: open a `.mrpack`, a CurseForge modpack `.zip`, or a CurseForge **server pack** `.zip`.
+    - Server packs install with no key: the loader (Forge / NeoForge / Fabric / Quilt) and its version are
+      read from the pack, the server is installed fresh, and the pack's mods and configs are copied in.
+    - CurseForge modpacks (`manifest.json`) need a free CurseForge API key (asked once, saved). Mods whose
+      authors block third-party downloads are listed with links in `MANUAL_DOWNLOADS.txt` in the server
+      folder; client-only mods, resource packs and shaders are skipped.
+  - **CurseForge modpack** (new card and tab next to Modrinth): search CurseForge like Modrinth (icons, tags,
+    downloads, last update, sorting, endless scrolling). When the author made a **server pack** for the
+    chosen version, that is installed (everything inside, nothing blocked); otherwise the modpack zip.
+    - Like Prism Launcher / GDLauncher, the official .exe carries the app's own CurseForge API key, so users
+      don't need one. It is added only at build time from the `CF_API_KEY` Actions secret and never stored
+      in the repository. Running from source, paste your own key (or set `MCSI_CF_KEY`).
+    - The key is also sent to CurseForge's download CDN (`x-api-key`), as CurseForge now asks apps to.
+  - Minecraft version, loader and loader version come from the pack, so the Version and Mods steps are
+    skipped. The server folder is named after the pack.
+  - Ports needed by mods in the pack (e.g. Simple Voice Chat) are opened automatically like before.
+- Path checks: files in a pack can't write outside the server folder.
+- Reinstalling into a folder where an earlier attempt's server is still running: that server (started by
+  this app, still a Java process) is stopped first; a server holding the world lock is reported instead of
+  failing halfway. Replacing a downloaded file now waits for antivirus scans (Windows "Access is denied").
+- **Much faster modpack installs**: mods download 8 at a time, like launchers do, and every file goes into a
+  shared cache (checked by SHA-1, kept under 4 GB). Reinstalling or making a second server with the same pack
+  reuses the files instead of downloading them again; files already in the folder are kept when they match.
+- The Forge installer's thousands of "Slim / Patching / Checksum" lines are folded in the log.
+- **Client-only mods, safely.** After a modpack is installed every jar in `mods/` is read (Fabric/Quilt
+  `environment`, Forge/NeoForge `mods.toml` dependencies, Jar-in-Jar libraries). Client-only mods
+  (marked by the mod itself, by the modpack, or on a short list of well-known ones like Oculus/Embeddium)
+  are moved to `mods_disabled/`, **unless a mod that stays on the server needs them** (required, not
+  client-side dependency, followed through chains). Nothing is deleted, and the folder has a README.
+  Mods the pack marked client-only are now downloaded too, so this check can keep the ones that are needed.
+- A note on the done page when a pack contains **e4mc** (it gives the server a public `*.e4mc.link` address).
+- **When the first start fails**, the server's log (and crash report) is read:
+  - a client-only mod that crashed it (`invalid dist DEDICATED_SERVER`, "Suspected Mod", ...) is moved to
+    `mods_disabled/` and the server is started again (if no other mod needs it);
+  - a missing mod is named, with a pointer to `MANUAL_DOWNLOADS.txt` when there is one;
+  - harmless "invalid dist" warnings that big packs print while starting fine are ignored: only a real
+    exception with that mod in its stack trace gets a mod moved;
+  - Forge 1.20.1's "X (modid) has failed to load correctly" list (with § colour codes) and
+    "Failed to create mod instance" are understood, so several client-only mods are removed in one retry;
+  - a crashed server whose Java keeps running (some mods leave threads alive) is no longer waited on for
+    15 minutes: the installer stops a few seconds after "Failed to start the minecraft server";
+  - otherwise the lines that say why (`Caused by`, `requires ...`) are shown instead of the bottom of a stack trace.
+- Mod search icons (and modpack icons) are now rounded and cached on disk for a week, so they show up instantly next time.
+
 ## 1.0.4.1
 
 - Fixed: long release notes in the update notice were cut off at the bottom and could not be scrolled.

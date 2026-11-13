@@ -10,3 +10,5 @@ venv/
 .vscode/
 *.log
 selftest_result.txt
+# CurseForge key, written only during release builds
+mcsi/core/_cf_embedded.py

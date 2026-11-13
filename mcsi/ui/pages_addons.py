@@ -6,52 +6,16 @@ from ..i18n import _
 from pathlib import Path
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QPixmap
-from PyQt6.QtWidgets import (QButtonGroup, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QScrollArea,
+from PyQt6.QtWidgets import (QButtonGroup, QFileDialog, QHBoxLayout, QLineEdit, QScrollArea,
                              QVBoxLayout, QWidget)
 
 from ..core import modrinth as M
-from ..core.net import get_bytes
 from .pages_setup import Page
 from .pages_config import Chip
 from ..core.providers import PROVIDERS
-from .state import icon_pool, run_async
+from .remote_icon import RemoteIcon
+from .state import run_async
 from .widgets import DANGER, MUTED, OK, WARN, Button, ElideLabel, Glass, Spinner, label, wrap_label
-
-_icon_cache: dict[str, QPixmap] = {}
-
-
-class Icon(QLabel):
-    def __init__(self, url: str, text: str):
-        super().__init__(text[:1].upper())
-        self.setFixedSize(42, 42)
-        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setStyleSheet("background: rgba(255,255,255,0.10); border-radius: 10px; font-weight: 800;")
-        if url:
-            if url in _icon_cache:
-                self._set(_icon_cache[url])
-            else:
-                run_async(lambda sig: get_bytes(url, timeout=8, cache_sec=3600, retries=1), self._got(url),
-                          lambda m: None, pool=icon_pool())
-
-    def _got(self, url):
-        def f(data):
-            pm = QPixmap()
-            if pm.loadFromData(data):
-                pm = pm.scaled(42, 42, Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                               Qt.TransformationMode.SmoothTransformation)
-                _icon_cache[url] = pm
-                try:
-                    self._set(pm)
-                except RuntimeError:  # widget already deleted
-                    pass
-        return f
-
-    def _set(self, pm):
-        self.setText("")
-        self.setPixmap(pm)
-        self.setStyleSheet("border-radius: 10px;")
-
 
 class HitRow(Glass):
     def __init__(self, hit: M.Hit, page: "AddonsPage"):
@@ -60,7 +24,7 @@ class HitRow(Glass):
         h = QHBoxLayout(self)
         h.setContentsMargins(12, 10, 12, 10)
         h.setSpacing(12)
-        h.addWidget(Icon(hit.icon_url, hit.title), 0, Qt.AlignmentFlag.AlignTop)
+        h.addWidget(RemoteIcon(hit.icon_url, hit.title, 42), 0, Qt.AlignmentFlag.AlignTop)
         v = QVBoxLayout()
         v.setSpacing(2)
         t = QHBoxLayout()

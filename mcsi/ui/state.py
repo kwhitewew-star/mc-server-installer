@@ -10,7 +10,7 @@ import platform
 import subprocess
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Optional
 
 from PyQt6.QtCore import QObject, QRunnable, QThreadPool, pyqtSignal
 
@@ -36,6 +36,8 @@ class State:
     mode: str = "standard"
     server: str = "paper"
     event: str = ""                                   # limited-time event loader picked instead (not saved)
+    modpack: Optional[dict] = None                    # modpack.Pack.to_dict() when installing a modpack (not saved)
+    modpack_source: str = ""                          # which card it came from: "modrinth" | "file" (not saved)
     mc: str = ""
     build: str = ""
     snapshots: bool = False
@@ -57,6 +59,8 @@ class State:
         d.pop("javas", None)
         d.pop("java_need", None)
         d.pop("event", None)
+        d.pop("modpack", None)
+        d.pop("modpack_source", None)
         d["values"] = {k: v for k, v in self.values.items() if k in schema.BY_KEY}
         if not self.app.get("remember", True):
             d = {"app": self.app, "fx": self.fx, "mode": self.mode}
@@ -99,6 +103,13 @@ class State:
 
 
 BASE_FOLDER = {"path": ""}
+
+
+def modpack_folder(pack: dict) -> str:
+    """Default folder for a modpack: its name, next to the normal server folders."""
+    import re
+    name = re.sub(r'[\\/:*?"<>|]+', "", str(pack.get("name", "modpack"))).strip().replace(" ", "-") or "modpack"
+    return str(Path(default_folder("x", "")).parent / f"{name}-{pack.get('mc', '')}".rstrip("-"))
 
 
 def event_folder(e) -> str:

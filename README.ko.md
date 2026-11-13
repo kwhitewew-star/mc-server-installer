@@ -20,6 +20,10 @@
   1.21.11부터의 snake_case 게임 규칙 이름을 자동으로 맞춥니다.
 - **모드·플러그인**: Modrinth에서 내 로더와 버전에 맞는 것만 검색하고 필수 의존성을 자동으로 추가합니다.
   내 `.jar`/`.zip` 파일도 넣을 수 있습니다.
+- **모드팩**: **Modrinth**와 **CurseForge** 모드팩을 앱에서 검색(아이콘, 태그, 다운로드 수, 업데이트 날짜,
+  정렬)하거나 `.mrpack` / CurseForge `.zip` / 서버팩 파일을 열어 설치합니다. 버전·로더·모드는 팩에서 정해지고,
+  클라이언트 전용 모드는 빠집니다. CurseForge는 제작자의 **서버팩**이 있으면 그걸 씁니다. 제작자가 외부 앱
+  다운로드를 막은 모드는 링크와 함께 `MANUAL_DOWNLOADS.txt`에 정리됩니다.
 - **Java**: 설치된 Java(마인크래프트 런처 포함)를 찾고, 없으면 Temurin JDK를 받아 줍니다.
 - **포트포워딩**: 필요한 포트를 자동으로 엽니다(모든 네트워크 어댑터로 UPnP, 그다음 PCP / NAT-PMP, 그다음
   Windows 자체 UPnP 서비스). Windows 방화벽 규칙도 추가합니다. 공유기가 막혀 있으면 내 네트워크 값
@@ -99,6 +103,10 @@ python -m pytest
 python scripts/screenshots.py ko      # 모든 화면을 오프스크린으로 돌며 잘림 확인
 python scripts/i18n_sync.py           # 언어별 빠진 번역 확인
 ```
+
+CurseForge API 키: 공식 빌드에는 앱 전용 키가 들어갑니다. console.curseforge.com에서 서드파티 키를 받아
+저장소의 Actions 시크릿 **`CF_API_KEY`**에 넣으면 릴리스 빌드에만 들어가고 저장소에는 올라가지 않습니다.
+자세한 내용은 [README.md](README.md#curseforge-api-key)를 보세요.
 
 번역은 `mcsi/i18n/<언어>.json`에 있으며, 영어 원문을 키로 씁니다. 자세한 내용은 [README.md](README.md#translations)를 보세요.
 

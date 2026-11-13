@@ -24,7 +24,7 @@ from . import schema
 from .java import NO_WINDOW, WINDOWS, probe
 from .net import Cancelled, NetError, download, get_json
 from .providers import PROVIDERS, Launch
-from . import upnp, winfw
+from . import modpack, upnp, winfw
 from .versions import props_moved_to_gamerules, uses_snake_gamerules
 
 AIKAR = ["-XX:+UseG1GC", "-XX:+ParallelRefProcEnabled", "-XX:MaxGCPauseMillis=200",
@@ -36,6 +36,23 @@ AIKAR_SMALL = ["-XX:G1NewSizePercent=30", "-XX:G1MaxNewSizePercent=40", "-XX:G1H
                "-XX:G1ReservePercent=20", "-XX:InitiatingHeapOccupancyPercent=15"]
 AIKAR_BIG = ["-XX:G1NewSizePercent=40", "-XX:G1MaxNewSizePercent=50", "-XX:G1HeapRegionSize=16M",
              "-XX:G1ReservePercent=15", "-XX:InitiatingHeapOccupancyPercent=20"]
+
+NOISY_RE = re.compile(r"^\s*(Slim|Data|Reading|Patching|Checksum:|Cant |Extra |Copying|Considering|Splitting|"
+                      r"Injecting|Processing|  Input|  Output|MD5:|SHA1?:)\b")
+# Printed when a modded server gives up. Some mods keep threads alive, so Java may never exit by itself.
+FATAL_RE = re.compile(r"Failed to start the minecraft server|Crash report saved to|"
+                      r"Failed to complete lifecycle event|Encountered an unexpected exception|"
+                      r"Incompatible mods found!|Mod resolution failed|ModLoadingException|"
+                      r"Exception in thread \"main\"|LoadingFailedException")
+
+
+class StartFailed(Exception):
+    """The first run ended before the server was ready (lines = everything it printed)."""
+
+    def __init__(self, lines: list[str], started: float):
+        super().__init__("server did not start")
+        self.lines, self.started = lines, started
+
 
 READY_RE = re.compile(r"Done \(\d|For help, type")
 NAME_RE = re.compile(r"^[A-Za-z0-9_]{3,16}$")
@@ -53,6 +70,8 @@ class Plan:
     values: dict = field(default_factory=dict)
     eula: bool = False
     addons: list = field(default_factory=list)
+    modpack: Optional[dict] = None         # modpack.Pack.to_dict()
+    cf_key: str = ""                       # CurseForge API key (CurseForge modpacks only)
 
 
 def split_names(s: str) -> list[str]:
@@ -129,7 +148,10 @@ class Installer:
         self._proc: Optional[subprocess.Popen] = None
         self.summary: list[str] = []
         self.forward: Optional[upnp.ForwardResult] = None
-        self.rules = upnp.port_rules(plan.values, [str(a.get("title", "")) for a in plan.addons])
+        titles = [str(a.get("title", "")) for a in plan.addons]
+        if plan.modpack:      # mods inside a modpack can need ports too (Geyser, Simple Voice Chat)
+            titles += [str(f.get("path", "")).rsplit("/", 1)[-1] for f in plan.modpack.get("files", [])]
+        self.rules = upnp.port_rules(plan.values, titles)
 
     # ---- Progress ----
     def stage(self, idx: int, text: str, start: int, end: int) -> None:
@@ -144,6 +166,9 @@ class Installer:
     def check(self) -> None:
         if self.is_cancelled():
             raise Cancelled()
+
+    def _dl(self, url, dest, sha1="", sha512=""):
+        download(url, Path(dest), None, self.is_cancelled, sha1=sha1, sha512=sha512)
 
     # ---- Ctx implementation (used by providers) ----
     def download(self, url, dest, sha256="", sha1="", md5=""):
@@ -161,14 +186,26 @@ class Installer:
             stdin=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace", bufsize=1,
             creationflags=NO_WINDOW)
         assert self._proc.stdout
+        hidden = 0
+        recent: list[str] = []
         for line in self._proc.stdout:
-            self.log("  " + line.rstrip())
+            line = line.rstrip()
+            if NOISY_RE.match(line):          # the Forge installer prints a line per class / file it patches
+                hidden += 1
+                recent.append(line)
+                del recent[:-30]
+                if hidden % 2000 == 0:
+                    self.log(_("  … {0} lines of installer output").format(hidden))
+            else:
+                self.log("  " + line)
             if self.is_cancelled():
                 self._proc.kill()
                 raise Cancelled()
         code = self._proc.wait()
         self._proc = None
         if code != 0:
+            for ln in recent:
+                self.log("  " + ln)
             raise NetError(_("Command failed (exit code {0}). Check the log above.").format(code))
 
     def kill(self) -> None:
@@ -183,6 +220,10 @@ class Installer:
         p, v = self.plan, self.plan.values
         prov = PROVIDERS[p.server]
         self.folder.mkdir(parents=True, exist_ok=True)
+        stop_leftover_servers(self.folder, self.log)
+        if server_running_in(self.folder):
+            raise NetError(_("A server is running in this folder (its world is locked). Stop it first, or "
+                             "choose another folder."))
 
         self.stage(0, _("Checking Java"), 0, 4)
         info = probe(self.java) if self.java else None
@@ -191,9 +232,15 @@ class Installer:
         self.log(f"Java: {info.label}  ({info.path})")
         self.java = info.path
 
-        self.stage(1, _("Downloading {0} {1}").format(prov.name, p.mc), 4, 52 if p.addons else 60)
+        self.stage(1, _("Downloading {0} {1}").format(prov.name, p.mc), 4, 40 if p.modpack else 52 if p.addons else 60)
         launch = prov.install(self, p.mc, p.build)
         self.check()
+
+        if p.modpack:
+            pack = modpack.Pack.from_dict(p.modpack)
+            self.stage(2, _("Installing modpack {0}").format(pack.name), 40, 60)
+            self.summary += modpack.install_pack(pack, self.folder, self._dl, self.log, self.sub, p.cf_key)
+            self.check()
 
         if p.addons:
             self.stage(2, _("Downloading {0} mods/plugins").format(len(p.addons)), 52, 60)
@@ -217,7 +264,7 @@ class Installer:
 
         if first:
             self.stage(5, _("First run (world generation)"), 72, 95)
-            self.first_run(launch, args)
+            self.first_run_fixing(launch, args)
         fw_auto = WINDOWS and v.get("manage:firewall_auto", True)
         if v.get("manage:upnp", True) or fw_auto:
             self.stage(6, _("Port forwarding · firewall"), 95, 99)
@@ -429,6 +476,68 @@ class Installer:
             self.log(_("Automatic port forwarding did not fully work. See the port forwarding guide on the last page."))
 
     # ---- First run ----
+    def first_run_fixing(self, launch: Launch, args: list[str], tries: int = 4) -> None:
+        """First run; when the log shows a client-only mod crashed the server, move that mod to mods_disabled
+        (unless another mod needs it) and try again."""
+        for attempt in range(tries):
+            try:
+                self.first_run(launch, args)
+                return
+            except StartFailed as e:
+                lines = e.lines + self._crash_report(e.started)
+                if attempt + 1 < tries and self._disable_blamed(lines):
+                    self.log(_("Starting the server again without it..."))
+                    continue
+                raise NetError(self._why_failed(lines)) from None
+
+    def _crash_report(self, since: float) -> list[str]:
+        d = self.folder / "crash-reports"
+        try:
+            reps = [p for p in d.glob("crash-*.txt") if p.stat().st_mtime >= since - 5]
+        except OSError:
+            return []
+        if not reps:
+            return []
+        rep = max(reps, key=lambda p: p.stat().st_mtime)
+        self.log(_("Crash report: {0}").format(rep.name))
+        try:
+            return rep.read_text(encoding="utf-8", errors="replace").splitlines()[:400]
+        except OSError:
+            return []
+
+    def _disable_blamed(self, lines: list[str]) -> bool:
+        from . import modscan
+        mods = modscan.scan(self.folder / "mods")
+        blamed = modscan.blame(lines, mods)
+        if not blamed:
+            return False
+        dec = modscan.decide(mods, blame=blamed)
+        hit = {b.lower() for b in blamed}
+        dec.remove = [(m, w) for m, w in dec.remove if hit & ({i.lower() for i in m.ids} | {m.file.lower()})]
+        dec.keep = [k for k in dec.keep if hit & ({i.lower() for i in k[0].ids} | {k[0].file.lower()})]
+        if not dec.remove:
+            for m, _w, need in dec.keep:
+                self.log(_("⚠ {0} crashed the server, but {1} needs it, so it was not removed.").format(m.label, need))
+            return False
+        self.log(_("The server crashed in a client-only mod:"))
+        self.summary += modscan.apply(self.folder, dec, self.log)
+        return True
+
+    def _why_failed(self, lines: list[str]) -> str:
+        from . import modscan
+        hint = modscan.explain(lines)
+        if re.search(r"UnsupportedClassVersionError|requires running the server with Java", "\n".join(lines)):
+            return _("The server did not start because Java is too old. Choose a newer Java.\n") + hint
+        miss = modscan.missing_deps(lines)
+        if miss:
+            msg = _("The server did not start: a mod it needs is missing.\n") + "\n".join(miss)
+            if (self.folder / "MANUAL_DOWNLOADS.txt").exists():
+                msg += "\n\n" + _("Download the mods listed in MANUAL_DOWNLOADS.txt into the server folder first, "
+                                   "then run start.bat.")
+            return msg
+        return (_("The server did not start correctly. Cause:\n") + hint + "\n\n" +
+                _("Full log: {0}").format(self.folder / "logs" / "latest.log"))
+
     def first_run(self, launch: Launch, args: list[str], timeout: float = 900) -> None:
         v = self.plan.values
         if launch.kind == "args":
@@ -440,6 +549,7 @@ class Installer:
             cmd, cwd=str(self.folder), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace", bufsize=1,
             creationflags=NO_WINDOW)
+        _remember_pid(self.folder, proc.pid)
         lines: "queue.Queue[Optional[str]]" = queue.Queue()
 
         def reader():
@@ -450,15 +560,24 @@ class Installer:
 
         threading.Thread(target=reader, daemon=True).start()
         tail: list[str] = []
+        every: list[str] = []
         start = time.time()
         ready = False
+        fatal_at = 0.0
 
         def pump(until: Callable[[], bool], limit: float) -> bool:
-            nonlocal ready
+            nonlocal ready, fatal_at
             end = time.time() + limit
             while time.time() < end:
+                if fatal_at and not ready and time.time() - fatal_at > 8:
+                    return False                  # crashed but Java hasn't exited: stop waiting
                 if self.is_cancelled():
                     proc.kill()
+                    try:
+                        proc.wait(timeout=10)
+                        _forget_pid(self.folder)
+                    except subprocess.TimeoutExpired:
+                        pass
                     raise Cancelled()
                 try:
                     ln = lines.get(timeout=0.2)
@@ -471,8 +590,13 @@ class Installer:
                 self.log("  │ " + ln)
                 tail.append(ln)
                 del tail[:-25]
+                every.append(ln)
+                if len(every) > 6000:
+                    del every[:1000]
                 if not ready and READY_RE.search(ln):
                     ready = True
+                if not ready and not fatal_at and FATAL_RE.search(ln):
+                    fatal_at = time.time()
                 if until():
                     return True
             return False
@@ -480,10 +604,13 @@ class Installer:
         pump(lambda: ready, timeout)
         if not ready:
             proc.kill()
-            hint = "\n".join(tail[-8:])
-            if "UnsupportedClassVersionError" in hint or "requires running the server with Java" in hint:
-                raise NetError(_("The server did not start because Java is too old. Choose a newer Java.\n") + hint)
-            raise NetError(_("The server did not start correctly. Last log lines:\n") + hint)
+            try:
+                proc.wait(timeout=10)
+                _forget_pid(self.folder)          # really gone: nothing to clean up next time
+            except subprocess.TimeoutExpired:
+                pass
+            self._proc = None
+            raise StartFailed(every, start)
         self.log(_("✓ The server started correctly. Applying settings."))
         self.sub(0.88)
         cmds = rule_commands(v, self.plan.mc)
@@ -514,4 +641,85 @@ class Installer:
         except subprocess.TimeoutExpired:
             proc.kill()
         self._proc = None
+        _forget_pid(self.folder)
         self.log(_("✓ First run finished, server stopped cleanly."))
+
+
+# ------------------------------------------------------------------ servers left running by an earlier attempt
+def _pid_file() -> Path:
+    from .java import APP_DIR
+    return APP_DIR / "first_run_pids.json"
+
+
+def _load_pids() -> dict:
+    try:
+        return json.loads(_pid_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_pids(d: dict) -> None:
+    try:
+        _pid_file().parent.mkdir(parents=True, exist_ok=True)
+        _pid_file().write_text(json.dumps(d), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _remember_pid(folder: Path, pid: int) -> None:
+    d = _load_pids()
+    d[str(Path(folder).resolve()).lower()] = pid
+    _save_pids(d)
+
+
+def _forget_pid(folder: Path) -> None:
+    d = _load_pids()
+    if d.pop(str(Path(folder).resolve()).lower(), None) is not None:
+        _save_pids(d)
+
+
+def _pid_is_java(pid: int) -> bool:
+    try:
+        if WINDOWS:
+            from . import proc as P
+            out = P.run(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"], timeout=10).stdout.lower()
+            return "java" in out and f'"{pid}"' in out
+        cmd = Path(f"/proc/{pid}/cmdline")
+        return cmd.exists() and b"java" in cmd.read_bytes()
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def stop_leftover_servers(folder: Path, log: Callable[[str], None] = lambda m: None) -> None:
+    """End a server this app started in ``folder`` during an earlier attempt that is still running
+    (a crashed modded server can keep Java alive, holding files that the new install must replace)."""
+    key = str(Path(folder).resolve()).lower()
+    pid = _load_pids().get(key)
+    if not pid:
+        return
+    if _pid_is_java(int(pid)):
+        log(_("Stopping a server left running from an earlier attempt (PID {0})...").format(pid))
+        try:
+            if WINDOWS:
+                from . import proc as P
+                P.run(["taskkill", "/PID", str(pid), "/T", "/F"], timeout=15)
+            else:
+                os.kill(int(pid), 9)
+            time.sleep(1.5)
+        except (OSError, subprocess.SubprocessError):
+            pass
+    _forget_pid(folder)
+
+
+def server_running_in(folder: Path) -> bool:
+    """A running server keeps world/session.lock locked (Windows refuses to open it)."""
+    lock = Path(folder) / "world" / "session.lock"
+    if not WINDOWS or not lock.is_file():
+        return False
+    try:
+        with open(lock, "ab"):
+            return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False

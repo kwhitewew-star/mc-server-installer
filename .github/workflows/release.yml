@@ -54,8 +54,12 @@ jobs:
           v=$(python -c "import mcsi; print(mcsi.__version__)")
           [ "v$v" = "$REF" ] || { echo "mcsi/__init__.py says $v but the tag is $REF"; exit 1; }
 
+      # The app's CurseForge API key (Settings → Secrets and variables → Actions → CF_API_KEY).
+      # Without it the build still works; users then paste their own key for CurseForge search.
       - name: Build
         run: python scripts/build_exe.py
+        env:
+          CF_API_KEY: ${{ secrets.CF_API_KEY }}
 
       # CI machines have no GPU. Mesa's software OpenGL lets the 3D background at least try to start;
       # a failed 3D start is only a warning (the app falls back to 2D), but the app must start.

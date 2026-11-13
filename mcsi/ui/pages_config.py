@@ -365,9 +365,14 @@ class SummaryPage(Page):
         items = [(_("Server"), p.name), (_("Version"), st.mc), (_("Build"), st.build or _("Automatic (recommended)")),
                  (_("Memory"), f"{st.ram} GB"), (_("Port"), str(st.values.get("server-port", 25565))),
                  ("Java", java.label if java else "?"), (_("Install folder"), st.folder),
-                 (_("Changed settings"), _("{0} / {1}").format(st.changed_count(), schema.count())),
-                 (_("Mods · plugins"), _("{0}").format(len(st.addons)) if st.addons else _("None")),
-                 (_("First run"), _("On (world generation + check)") if st.values.get("manage:first_run", True) else _("Off"))]
+                 (_("Changed settings"), _("{0} / {1}").format(st.changed_count(), schema.count()))]
+        if st.modpack:
+            items = [(_("Modpack"), f"{st.modpack.get('name', '')} {st.modpack.get('version', '')}".strip()),
+                     (_("Modpack contents"), st.modpack.get("summary", ""))] + items
+        else:
+            items.append((_("Mods · plugins"), _("{0}").format(len(st.addons)) if st.addons else _("None")))
+        items.append((_("First run"), _("On (world generation + check)") if st.values.get("manage:first_run", True)
+                      else _("Off")))
         self._fill(items)
         self._warnings(st, p)
 
@@ -576,12 +581,14 @@ class InstallPage(Page):
         java = next((j for j in st.javas if j.path == st.java), None)
         plan = Plan(server=st.server, mc=st.mc, build=st.build, folder=st.folder, ram_gb=st.ram, java=st.java,
                     java_major=java.major if java else 0, values=dict(st.values), eula=st.eula,
-                    addons=list(st.addons))
+                    addons=[] if st.modpack else list(st.addons), modpack=st.modpack,
+                    cf_key=str(st.app.get("curseforge_key", "")))
         self.log.clear()
         for r in self.rows:
             r.set("wait")
-        if not st.addons:
+        if not st.addons and not st.modpack:
             self.rows[2].set("skip")
+        self.rows[2].text.setText(_("Installing the modpack") if st.modpack else STAGES[2])
         if not st.values.get("manage:first_run", True):
             self.rows[5].set("skip")
         if not st.values.get("manage:upnp", True) and not (os.name == "nt" and st.values.get("manage:firewall_auto", True)):

@@ -75,6 +75,11 @@ MR_PROJECTS = {
     "essentialsx": ("EssentialsX", "Essential commands plugin", "md678685", 5_000_000, "plugin", ["vault"]),
     "vault": ("Vault", "Economy API", "MilkBowl", 4_000_000, "plugin", []),
     "terralith": ("Terralith", "Overworld datapack", "Stardust", 20_000_000, "datapack", []),
+    "fabulously-optimized": ("Fabulously Optimized", "Improved performance and graphics", "robotkoer", 30_000_000,
+                             "modpack", []),
+    "cobblemon-official": ("Cobblemon Official Modpack", "The official Cobblemon pack", "Cobblemon", 9_000_000,
+                           "modpack", []),
+    "better-mc": ("Better MC [FORGE]", "Vanilla+ with 200+ mods", "LunaPixel", 12_000_000, "modpack", []),
 }
 
 
@@ -87,14 +92,62 @@ def _mr_search(url):
     hits = []
     for pid, (t, d, a, dl, k, deps) in MR_PROJECTS.items():
         if k == ptype and (not query or query in t.lower()):
+            extra = MR_PACK_META.get(pid, {}) if k == "modpack" else {}
             hits.append({"project_id": pid, "slug": pid, "title": t, "description": d, "author": a,
-                         "downloads": dl, "icon_url": "", "project_type": k})
-    hits.sort(key=lambda h: -h["downloads"])
-    return {"hits": hits, "total_hits": len(hits), "offset": 0, "limit": 20}
+                         "downloads": dl, "icon_url": extra.get("icon_url", ""), "project_type": k,
+                         "follows": extra.get("follows", 0), "display_categories": extra.get("cats", []),
+                         "versions": extra.get("versions", []), "date_modified": extra.get("updated", ""),
+                         "color": extra.get("color", 0), "server_side": extra.get("server_side", "")})
+    sort = q.get("index", ["downloads"])[0]
+    key = {"follows": "follows", "updated": "date_modified", "newest": "date_modified"}.get(sort, "downloads")
+    hits.sort(key=lambda h: h[key], reverse=True)
+    off, lim = int(q.get("offset", ["0"])[0]), int(q.get("limit", ["20"])[0])
+    return {"hits": hits[off:off + lim], "total_hits": len(hits), "offset": off, "limit": lim}
+
+
+MR_PACK_META = {
+    "fabulously-optimized": {"icon_url": "https://cdn.modrinth.com/data/fo/icon.png", "follows": 4_200,
+                             "cats": ["fabric", "optimization", "lightweight"], "color": 0x7DB4E6,
+                             "versions": ["1.20.1", "1.21", "1.21.1"], "updated": "2026-11-09T10:00:00Z",
+                             "server_side": "optional"},
+    "cobblemon-official": {"icon_url": "https://cdn.modrinth.com/data/cobble/icon.png", "follows": 2_800,
+                           "cats": ["fabric", "adventure", "multiplayer"], "color": 0xE8604C,
+                           "versions": ["1.21.1"], "updated": "2026-10-28T10:00:00Z", "server_side": "required"},
+    "better-mc": {"icon_url": "https://cdn.modrinth.com/data/bmc/icon.png", "follows": 1_900,
+                  "cats": ["forge", "adventure", "magic", "technology"], "color": 0x5FB85A,
+                  "versions": ["1.19.2", "1.20.1"], "updated": "2026-08-02T10:00:00Z", "server_side": "required"},
+}
+
+
+def fake_icon(url: str) -> bytes:
+    """A small original PNG icon (coloured tile with a block shape) for fake Modrinth projects."""
+    from PyQt6.QtCore import QBuffer, QByteArray, QIODevice
+    from PyQt6.QtGui import QColor, QImage, QPainter
+    import zlib
+    c = QColor.fromHsv(zlib.crc32(url.encode()) % 360, 150, 210)
+    img = QImage(96, 96, QImage.Format.Format_ARGB32)
+    img.fill(c.darker(160))
+    p = QPainter(img)
+    p.fillRect(20, 20, 56, 56, c)
+    p.fillRect(20, 20, 56, 14, c.lighter(140))
+    p.fillRect(38, 46, 20, 20, c.darker(130))
+    p.end()
+    ba = QByteArray()
+    buf = QBuffer(ba)
+    buf.open(QIODevice.OpenModeFlag.WriteOnly)
+    img.save(buf, "PNG")
+    return bytes(ba)
 
 
 def _mr_versions(pid):
     t, d, a, dl, k, deps = MR_PROJECTS[pid]
+    if k == "modpack":
+        loader = "forge" if "forge" in t.lower() else "fabric"
+        return [{"id": f"{pid}-{i}", "name": f"{t} {n}", "version_number": n, "game_versions": [mc],
+                 "loaders": [loader], "files": [{"url": f"https://cdn.modrinth.com/data/{pid}/{pid}-{n}.mrpack",
+                                                 "filename": f"{pid}-{n}.mrpack", "primary": True,
+                                                 "hashes": {"sha1": ""}}]}
+                for i, (n, mc) in enumerate((("6.2.0", "1.21.1"), ("5.9.1", "1.20.1")))]
     if pid == "sodium":
         return []   # scenario: no version compatible with the server
     return [{"id": f"{pid}-v2", "project_id": pid, "version_number": "2.0.0", "version_type": "release",
@@ -162,7 +215,9 @@ def get_json(url, timeout=30):
     return json.loads(json.dumps(route(url)))
 
 
-def get_bytes(url, timeout=30, cache_sec=0):
+def get_bytes(url, timeout=30, cache_sec=0, retries=3):
+    if url.endswith("icon.png"):
+        return fake_icon(url)
     if "neoforged" in url:
         return NEO_META.encode()
     if "minecraftforge" in url:
@@ -170,10 +225,67 @@ def get_bytes(url, timeout=30, cache_sec=0):
     return json.dumps(route(url)).encode()
 
 
+CF_PACKS = [
+    {"id": 715572, "slug": "all-the-mods-9", "name": "All the Mods 9 - ATM9", "summary": "Kitchen sink pack with 400+ mods",
+     "downloadCount": 21_500_000, "thumbsUpCount": 900, "dateModified": "2026-11-02T08:00:00Z",
+     "logo": {"thumbnailUrl": "https://media.forgecdn.net/avatars/thumbnails/atm9/icon.png"},
+     "authors": [{"name": "ATMTeam"}], "categories": [{"name": "Tech"}, {"name": "Magic"}, {"name": "Exploration"}],
+     "links": {"websiteUrl": "https://www.curseforge.com/minecraft/modpacks/all-the-mods-9"},
+     "latestFilesIndexes": [{"gameVersion": "1.20.1", "modLoader": 1}]},
+    {"id": 452013, "slug": "rlcraft", "name": "RLCraft", "summary": "Hardcore realism",
+     "downloadCount": 20_100_000, "thumbsUpCount": 700, "dateModified": "2026-06-10T08:00:00Z",
+     "logo": {"thumbnailUrl": "https://media.forgecdn.net/avatars/thumbnails/rl/icon.png"},
+     "authors": [{"name": "Shivaxi"}], "categories": [{"name": "Adventure and RPG"}],
+     "links": {"websiteUrl": "https://www.curseforge.com/minecraft/modpacks/rlcraft"},
+     "latestFilesIndexes": [{"gameVersion": "1.12.2", "modLoader": 1}]},
+    {"id": 925200, "slug": "cozy-fabric", "name": "Cozy Fabric", "summary": "Relaxed Fabric survival",
+     "downloadCount": 450_000, "thumbsUpCount": 40, "dateModified": "2026-11-11T08:00:00Z",
+     "logo": {"thumbnailUrl": "https://media.forgecdn.net/avatars/thumbnails/cozy/icon.png"},
+     "authors": [{"name": "Cozy"}], "categories": [{"name": "Multiplayer"}],
+     "links": {"websiteUrl": "https://www.curseforge.com/minecraft/modpacks/cozy-fabric"},
+     "latestFilesIndexes": [{"gameVersion": "1.21.1", "modLoader": 4}]},
+]
+CF_FILES = {
+    715572: [{"id": 5001, "displayName": "All the Mods 9-0.3.0", "fileName": "ATM9-0.3.0.zip",
+              "gameVersions": ["1.20.1", "Forge"], "fileDate": "2026-11-02T08:00:00Z", "isServerPack": False,
+              "serverPackFileId": 5002, "downloadUrl": "https://edge.forgecdn.net/files/5/1/ATM9-0.3.0.zip",
+              "hashes": []},
+             {"id": 5002, "displayName": "Server", "fileName": "ServerFiles-0.3.0.zip", "isServerPack": True,
+              "gameVersions": ["1.20.1"], "fileDate": "2026-11-02T08:00:00Z",
+              "downloadUrl": "https://edge.forgecdn.net/files/5/2/ServerFiles-0.3.0.zip", "hashes": []}],
+    925200: [{"id": 6001, "displayName": "Cozy 1.2", "fileName": "Cozy-1.2.zip", "gameVersions": ["1.21.1", "Fabric"],
+              "fileDate": "2026-11-11T08:00:00Z", "isServerPack": False, "serverPackFileId": 0,
+              "downloadUrl": None, "hashes": []}],
+}
+
+
+def cf_get(path, key, params=None):
+    """Fake CurseForge REST API (GET)."""
+    from mcsi.core.modpack import PackError
+    if not key:
+        raise PackError("no key")
+    if path == "/mods/search":
+        q = (params or {}).get("searchFilter", "").lower()
+        hits = [m for m in CF_PACKS if q in m["name"].lower()]
+        off, lim = int(params.get("index", 0)), int(params.get("pageSize", 20))
+        return {"data": hits[off:off + lim], "pagination": {"index": off, "pageSize": lim,
+                                                            "resultCount": len(hits[off:off + lim]),
+                                                            "totalCount": len(hits)}}
+    parts = path.strip("/").split("/")
+    mod = int(parts[1])
+    if len(parts) == 3:
+        return {"data": CF_FILES.get(mod, []), "pagination": {"totalCount": len(CF_FILES.get(mod, []))}}
+    fid = int(parts[3])
+    return {"data": next(f for f in CF_FILES.get(mod, []) if f["id"] == fid)}
+
+
 def install():
     """Route every provider / Modrinth request to the fakes above."""
+    import mcsi.core.modpack as MP
     import mcsi.core.modrinth as M
     import mcsi.core.providers as P
     P.get_json = get_json
     P.get_bytes = get_bytes
     M.get_json = get_json
+    MP.get_json = get_json
+    MP._cf_get = cf_get

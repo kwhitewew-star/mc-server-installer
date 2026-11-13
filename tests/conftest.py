@@ -58,3 +58,10 @@ def no_upnp(monkeypatch):
 
     monkeypatch.setattr(upnp, "forward_ports", fake_forward)
     return calls
+
+
+@pytest.fixture(autouse=True)
+def _private_file_cache(tmp_path, monkeypatch):
+    """Keep the modpack download cache out of the real home folder."""
+    from mcsi.core import modpack
+    monkeypatch.setattr(modpack, "_file_cache", lambda: tmp_path / "_filecache")

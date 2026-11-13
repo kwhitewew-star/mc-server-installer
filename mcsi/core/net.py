@@ -116,6 +116,28 @@ STALL_SEC = 20          # no data for this long -> reconnect and resume
 RESUMES = 5
 
 
+def _replace(part: Path, dest: Path, tries: int = 12) -> None:
+    """Move the finished .part over the target. On Windows that fails while another program has the target
+    open (antivirus scanning it, or a server from an earlier attempt still running in the folder)."""
+    for i in range(tries):
+        try:
+            os.replace(part, dest)
+            return
+        except PermissionError:
+            if i == tries - 1:
+                break
+            time.sleep(0.25 * (i + 1))           # ~10 s in total: long enough for a virus scan
+    try:
+        if dest.is_file() and dest.stat().st_size == part.stat().st_size:
+            part.unlink()                         # the same file is already there and just locked
+            return
+    except OSError:
+        pass
+    raise NetError(_("{0} is being used by another program, so it can't be replaced. A server started earlier "
+                     "may still be running in this folder: close its window (or end java.exe in Task "
+                     "Manager), then try again.").format(dest.name))
+
+
 def download(url: str, dest: Path, on_progress: Optional[Callable[[int, int], None]] = None,
              is_cancelled: Callable[[], bool] = lambda: False,
              sha256: str = "", sha1: str = "", md5: str = "", sha512: str = "",
@@ -132,10 +154,12 @@ def download(url: str, dest: Path, on_progress: Optional[Callable[[int, int], No
     done, total, resumes = 0, 0, 0
     t0 = time.time()
     next_log = 0.1
+    from .cfkey import headers_for
+    auth = headers_for(url)
     try:
         with open(part, "wb") as f:
             while True:
-                headers = {"Range": f"bytes={done}-"} if done else None
+                headers = {**auth, **({"Range": f"bytes={done}-"} if done else {})} or None
                 try:
                     resp = open_url(url, timeout=STALL_SEC, headers=headers)
                 except NetError:
@@ -194,7 +218,7 @@ def download(url: str, dest: Path, on_progress: Optional[Callable[[int, int], No
         for k, h in hashers.items():
             if h.hexdigest().lower() != expected[k].lower():
                 raise NetError(_("{0} checksum ({1}) mismatch: the file is corrupted. Please try again.").format(dest.name, k))
-        os.replace(part, dest)
+        _replace(part, dest)
     except BaseException:
         try:
             part.unlink()

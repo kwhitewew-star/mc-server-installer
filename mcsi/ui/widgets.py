@@ -322,6 +322,7 @@ class Card(QAbstractButton):
                  parent=None, height: int = 104):
         super().__init__(parent)
         self.title, self.desc, self.accent, self.badge, self.icon = title, desc, QColor(accent), badge, icon
+        self.image = None            # optional QImage drawn in place of the icon letter (e.g. a modpack's icon)
         self.setCheckable(True)
         self.h = Hover(self)
         self.sel = Hover(self, 220)
@@ -360,7 +361,20 @@ class Card(QAbstractButton):
             p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawRoundedRect(r.adjusted(-2, -2, 2, 2), 18, 18)
         x = r.left() + 18
-        if self.icon:
+        if self.icon and self.image is not None:
+            dot = QRectF(x, r.top() + 16, 34, 34)
+            clip = QPainterPath()
+            clip.addRoundedRect(dot, 10, 10)
+            p.save()
+            p.setClipPath(clip)
+            p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+            p.drawImage(dot, self.image)
+            p.restore()
+            p.setPen(QPen(QColor(255, 255, 255, 50), 1))
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawRoundedRect(dot, 10, 10)
+            x = dot.right() + 12
+        elif self.icon:
             dot = QRectF(x, r.top() + 16, 34, 34)
             g = QLinearGradient(dot.topLeft(), dot.bottomRight())
             c = QColor(self.accent)

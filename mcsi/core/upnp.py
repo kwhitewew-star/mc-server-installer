@@ -594,7 +594,7 @@ def port_rules(values: dict, addon_titles: list[str]) -> list[tuple[int, str, st
         rules.append((q, "UDP", _("Query (server list tools)")))
     if any("geyser" in t.lower() for t in addon_titles):
         rules.append((19132, "UDP", _("Bedrock Edition players (Geyser)")))
-    if any("simple voice chat" in t.lower() or t.lower() == "voicechat" for t in addon_titles):
+    if any("simple voice chat" in t.lower() or t.lower().startswith("voicechat") for t in addon_titles):
         rules.append((24454, "UDP", _("Simple Voice Chat")))
     seen, out = set(), []
     for r in rules:

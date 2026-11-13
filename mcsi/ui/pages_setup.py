@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (QButtonGroup, QFileDialog, QGridLayout, QHBoxLayout
 from ..core import ports, schema
 from ..core.java import best_for, find_javas, install_jdk
 from ..core.providers import PROVIDERS
-from .state import State, default_folder, event_folder, recommended_ram, run_async, total_ram_gb
+from .state import State, default_folder, event_folder, modpack_folder, recommended_ram, run_async, total_ram_gb
 from .widgets import (ACCENT, FlowLayout, DANGER, MUTED, OK, WARN, Button, Card, Glass, NoWheelCombo, NoWheelSpin,
                          Progress, Spinner, Toggle, label)
 from ..core.versions import is_release, required_java
@@ -96,6 +96,7 @@ class WelcomePage(Page):
 class ServerPage(Page):
     picked = pyqtSignal(str)
     event_picked = pyqtSignal(str)
+    modpack_clicked = pyqtSignal(str)          # "modrinth" | "curseforge" | "file"
     title = _("Server type")
     subtitle = _("Plugins: Paper or Purpur. Mods: Fabric or NeoForge. Both: a hybrid like Youer or Arclight.")
 
@@ -119,6 +120,27 @@ class ServerPage(Page):
         self.ev_box.hide()
         self.ev_cards = {}
         box.addWidget(self.ev_box)
+        # modpacks: Modrinth search or a file (.mrpack / CurseForge zip / server pack)
+        box.addWidget(label(_("📦 Modpacks · install a whole pack at once"), "small"))
+        mgrid = QGridLayout()
+        mgrid.setHorizontalSpacing(10)
+        self.mp_cards = {}
+        for i, (k, title, desc, icon) in enumerate((
+                ("modrinth", _("Modrinth modpack"), _("Search and install a modpack from Modrinth"), "M"),
+                ("curseforge", _("CurseForge modpack"), _("Search CurseForge · uses the server pack when there is one"),
+                 "CF"),
+                ("file", _("Modpack file"), _(".mrpack, CurseForge modpack or server pack .zip"), "📦"))):
+            color = {"modrinth": "#1bd96a", "curseforge": "#f16436"}.get(k, "#60a5fa")
+            c = Card(title, desc, color, "", icon, height=112)
+            self.group.addButton(c)
+            c.clicked.connect(lambda _=False, kk=k: self.modpack_clicked.emit(kk))
+            mgrid.addWidget(c, 0, i)
+            self.mp_cards[k] = c
+        mgrid.setColumnStretch(0, 1)
+        mgrid.setColumnStretch(1, 1)
+        mgrid.setColumnStretch(2, 1)
+        box.addLayout(mgrid)
+        box.addSpacing(6)
         for title, kinds in ((_("Vanilla · plugin servers"), ("vanilla", "plugin")), (_("Modded servers"), ("mod",)),
                             (_("Hybrid servers · mods and plugins together"), ("hybrid",))):
             box.addWidget(label(title, "small"))
@@ -143,8 +165,34 @@ class ServerPage(Page):
         scroll.setWidget(inner)
         self.root.addWidget(scroll, 1)
 
+    def show_modpack(self, pack: dict | None, source: str = "") -> None:
+        """Show the chosen modpack on its card (or reset the cards)."""
+        for k, c in self.mp_cards.items():
+            c.badge = ""
+            c.image = None
+            c.desc = {"modrinth": _("Search and install a modpack from Modrinth"),
+                      "curseforge": _("Search CurseForge · uses the server pack when there is one")}.get(
+                k, _(".mrpack, CurseForge modpack or server pack .zip"))
+        if pack:
+            c = self.mp_cards.get(source) or self.mp_cards["file"]
+            c.badge = _("Selected")
+            c.desc = f"{pack.get('name', '')} {pack.get('version', '')} · {pack.get('mc', '')}"
+            c.setChecked(True)
+            if pack.get("icon_url"):
+                from . import remote_icon
+
+                def got(img, c=c, url=pack["icon_url"]):
+                    if (self.st.modpack or {}).get("icon_url") == url:
+                        c.image = img
+                        c.update()
+                remote_icon.load(pack["icon_url"], got)
+        for c in self.mp_cards.values():
+            c.update()
+
     def enter(self):
-        if self.st.event in self.ev_cards:
+        if self.st.modpack:
+            self.show_modpack(self.st.modpack, self.st.modpack_source)
+        elif self.st.event in self.ev_cards:
             self.ev_cards[self.st.event].setChecked(True)
         elif self.st.server in self.cards:
             self.cards[self.st.server].setChecked(True)
@@ -184,6 +232,9 @@ class ServerPage(Page):
 
     def _pick(self, k):
         self.st.event = ""
+        if self.st.modpack:
+            self.st.modpack = None
+            self.show_modpack(None)
         if k != self.st.server:
             self.st.server = k
             self.st.mc = ""
@@ -192,7 +243,7 @@ class ServerPage(Page):
         self.picked.emit(k)
 
     def can_next(self):
-        return bool(self.st.event) or self.st.server in PROVIDERS
+        return bool(self.st.event) or bool(self.st.modpack) or self.st.server in PROVIDERS
 
 
 # ------------------------------------------------------------------ 3. Version
@@ -521,7 +572,8 @@ class ResourcePage(Page):
         from ..core import events as ev
         e = ev.find(self.st.event) if self.st.event else None
         if not self.st.folder:
-            self.st.folder = event_folder(e) if e else default_folder(self.st.server, self.st.mc)
+            self.st.folder = event_folder(e) if e else modpack_folder(self.st.modpack) if self.st.modpack \
+                else default_folder(self.st.server, self.st.mc)
         self.folder.setText(self.st.folder)
         self._check_folder()
         self.perf.setVisible(e is None)
