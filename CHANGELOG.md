@@ -7,14 +7,14 @@
     Results look like on modrinth.com: the pack's icon, author, tags (loader, categories, newest Minecraft
     version), downloads, followers and when it was last updated; sort by relevance / downloads / follows /
     recently updated / newest, and more results load as you scroll. The chosen pack's icon shows on its card.
-    Only the mods the server needs are fetched (client-only mods are skipped), every file is checked
-    against its SHA-1/SHA-512, and `overrides/` + `server-overrides/` are applied.
+    Every file is checked against its SHA-1/SHA-512 and `overrides/` + `server-overrides/` are applied;
+    client-only mods are sorted out afterwards (see "Client-only mods, safely" below).
   - **Modpack file**: open a `.mrpack`, a CurseForge modpack `.zip`, or a CurseForge **server pack** `.zip`.
     - Server packs install with no key: the loader (Forge / NeoForge / Fabric / Quilt) and its version are
       read from the pack, the server is installed fresh, and the pack's mods and configs are copied in.
     - CurseForge modpacks (`manifest.json`) need a free CurseForge API key (asked once, saved). Mods whose
       authors block third-party downloads are listed with links in `MANUAL_DOWNLOADS.txt` in the server
-      folder; client-only mods, resource packs and shaders are skipped.
+      folder; resource packs and shaders are skipped, client-only mods are sorted out after install.
   - **CurseForge modpack** (new card and tab next to Modrinth): search CurseForge like Modrinth (icons, tags,
     downloads, last update, sorting, endless scrolling). When the author made a **server pack** for the
     chosen version, that is installed (everything inside, nothing blocked); otherwise the modpack zip.
